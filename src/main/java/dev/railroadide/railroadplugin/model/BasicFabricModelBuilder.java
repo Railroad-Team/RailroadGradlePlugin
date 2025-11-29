@@ -13,6 +13,12 @@ import java.util.Objects;
 import java.util.Optional;
 
 public class BasicFabricModelBuilder implements ToolingModelBuilder {
+    private final String loomVersion;
+
+    public BasicFabricModelBuilder(String loomVersion) {
+        this.loomVersion = loomVersion;
+    }
+
     @Override
     public boolean canBuild(String modelName) {
         return modelName.equals("dev.railroadide.railroadplugin.model.BasicFabricModelBuilder");
@@ -21,12 +27,12 @@ public class BasicFabricModelBuilder implements ToolingModelBuilder {
     @Override
     public @NotNull Object buildAll(String modelName, @NotNull Project project) {
         if (modelName.equals(FabricDataModel.class.getName()))
-            return buildFabricModel(project);
+            return buildFabricModel(this.loomVersion, project);
 
         throw new IllegalArgumentException("Unsupported model: " + modelName);
     }
 
-    private static FabricDataModel buildFabricModel(Project project) {
+    private static FabricDataModel buildFabricModel(String pluginLoomVersion, Project project) {
         List<ExternalModuleDependency> allDependencies = project.getConfigurations()
                 .stream()
                 .flatMap(config -> config.getAllDependencies().stream())
@@ -40,9 +46,9 @@ public class BasicFabricModelBuilder implements ToolingModelBuilder {
         String loaderVersion = findDependencyVersion(allDependencies, "net.fabricmc", "fabric-loader", false);
         String fabricApiVersion = findDependencyVersion(allDependencies, "net.fabricmc.fabric-api", "fabric-api", false);
 
-        boolean hasLoomVersion = project.hasProperty("fabricLoomVersion");
+        boolean hasLoomVersion = pluginLoomVersion != null && !pluginLoomVersion.isEmpty();
         String loomVersion = hasLoomVersion ?
-                Objects.requireNonNull(project.property("fabricLoomVersion")).toString() :
+                Objects.requireNonNull(pluginLoomVersion) :
                 findDependencyVersion(allDependencies, "dev.architectury", "fabric-loom", false);
         boolean isArchitecturyLoom = loomVersion != null && loomVersion.contains("architectury");
 

@@ -11,12 +11,12 @@ import org.gradle.tooling.provider.model.ToolingModelBuilderRegistry;
 
 import javax.inject.Inject;
 
-public class RailroadPlugin implements Plugin<Project> {
+public class RailroadProjectPlugin implements Plugin<Project> {
     private static final String DOWNLOAD_SOURCES_TASK_GROUP = "Documentation";
     private final ToolingModelBuilderRegistry registry;
 
     @Inject
-    public RailroadPlugin(ToolingModelBuilderRegistry registry) {
+    public RailroadProjectPlugin(ToolingModelBuilderRegistry registry) {
         this.registry = registry;
     }
 
@@ -25,8 +25,10 @@ public class RailroadPlugin implements Plugin<Project> {
         project.getLogger().lifecycle("Railroad plugin applied to project '{}'", project.getName());
 
         registry.register(new BasicRailroadModelBuilder());
-        registry.register(new BasicFabricModelBuilder());
+        registry.register(new BasicFabricModelBuilder(RailroadSettingsPlugin.loomVersion));
         registry.register(new BasicForgeModelBuilder());
+
+        registerTasks(project);
     }
 
     private void registerTasks(Project project) {

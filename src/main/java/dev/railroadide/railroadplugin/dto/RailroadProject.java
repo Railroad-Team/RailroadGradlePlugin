@@ -9,4 +9,6 @@ public interface RailroadProject extends HierarchicalElement {
     DomainObjectSet<? extends RailroadModule> getChildren();
 
     DomainObjectSet<? extends RailroadModule> getModules();
+
+    boolean hasPlugin(String pluginId);
 }

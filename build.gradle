@@ -4,7 +4,7 @@ plugins {
 }
 
 group = 'dev.railroadide'
-version = '1.1.0'
+version = '1.2.0'
 description = 'Railroad Gradle plugin'
 
 base {
@@ -36,10 +36,18 @@ gradlePlugin {
     plugins {
         railroad {
             id = 'dev.railroadide.railroadgradleplugin'
-            implementationClass = 'dev.railroadide.railroadplugin.RailroadPlugin'
+            implementationClass = 'dev.railroadide.railroadplugin.RailroadProjectPlugin'
             displayName = 'Railroad plugin'
             description = 'Exposes tasks to help with Railroad IDE integration.'
             tags.set(['railroad', 'ide', 'integration'])
+        }
+
+        railroadSettings {
+            id = 'dev.railroadide.railroadgradleplugin.settings'
+            implementationClass = 'dev.railroadide.railroadplugin.RailroadSettingsPlugin'
+            displayName = 'Railroad settings plugin'
+            description = 'Configures Railroad IDE integration at the settings level.'
+            tags.set(['railroad', 'ide', 'integration', 'settings'])
         }
     }
 }

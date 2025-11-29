@@ -53,4 +53,9 @@ public class BasicRailroadProject implements RailroadProject {
     public @Nullable String getDescription() {
         return project.getDescription();
     }
+
+    @Override
+    public boolean hasPlugin(String pluginId) {
+        return project.getPlugins().hasPlugin(pluginId);
+    }
 }
