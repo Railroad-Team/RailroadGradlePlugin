@@ -4,7 +4,7 @@ plugins {
 }
 
 group = 'dev.railroadide'
-version = '1.0.0'
+version = '1.1.0'
 description = 'Railroad Gradle plugin'
 
 base {
@@ -35,7 +35,7 @@ dependencies {
 gradlePlugin {
     plugins {
         railroad {
-            id = 'railroad'
+            id = 'dev.railroadide.railroadgradleplugin'
             implementationClass = 'dev.railroadide.railroadplugin.RailroadPlugin'
             displayName = 'Railroad plugin'
             description = 'Exposes tasks to help with Railroad IDE integration.'
@@ -47,7 +47,7 @@ gradlePlugin {
 publishing {
     publications {
         withType(MavenPublication).configureEach {
-            artifactId = 'railroad-plugin'
+            artifactId = 'railroad-gradle-plugin'
         }
     }
 

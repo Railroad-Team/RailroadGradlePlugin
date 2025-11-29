@@ -15,4 +15,5 @@ public interface RailroadModule extends HierarchicalElement, HasGradleProject {
     RailroadProject getProject();
     RailroadCompilerOutput getCompilerOutput();
     DomainObjectSet<? extends RailroadConfiguration> getConfigurations();
+    DomainObjectSet<? extends RailroadGradleTask> getTasks();
 }

@@ -1,5 +1,6 @@
 package dev.railroadide.railroadplugin.dto.impl;
 
+import dev.railroadide.railroadplugin.dto.RailroadModule;
 import org.gradle.api.Project;
 import org.gradle.tooling.internal.gradle.DefaultProjectIdentifier;
 import org.gradle.tooling.model.*;
@@ -14,15 +15,14 @@ import java.util.stream.Collectors;
 /**
  * Minimal adapter to expose a {@link GradleProject} view of a {@link Project}.
  */
-public class BasicGradleProjectAdapter implements GradleProject {
-    private final Project project;
-    private final @Nullable BasicGradleProjectAdapter parent;
-
-    public BasicGradleProjectAdapter(Project project) {
-        this(project, null);
+public record BasicGradleProjectAdapter(RailroadModule module, Project project,
+                                        @Nullable BasicGradleProjectAdapter parent) implements GradleProject {
+    public BasicGradleProjectAdapter(RailroadModule module, Project project) {
+        this(module, project, null);
     }
 
-    private BasicGradleProjectAdapter(Project project, @Nullable BasicGradleProjectAdapter parent) {
+    public BasicGradleProjectAdapter(RailroadModule module, Project project, @Nullable BasicGradleProjectAdapter parent) {
+        this.module = module;
         this.project = project;
         this.parent = parent;
     }
@@ -36,7 +36,7 @@ public class BasicGradleProjectAdapter implements GradleProject {
     public DomainObjectSet<? extends GradleTask> getTasks() {
         return project.getTasks()
                 .stream()
-                .map(task -> new BasicGradleTaskAdapter(project, task, this))
+                .map(task -> new BasicGradleTaskAdapter(this.module, project, task, this))
                 .collect(Collectors.collectingAndThen(
                         Collectors.toList(),
                         ImmutableDomainObjectSet::of
@@ -53,7 +53,7 @@ public class BasicGradleProjectAdapter implements GradleProject {
         return project.getChildProjects()
                 .values()
                 .stream()
-                .map(child -> new BasicGradleProjectAdapter(child, this))
+                .map(child -> new BasicGradleProjectAdapter(this.module, child, this))
                 .collect(Collectors.collectingAndThen(
                         Collectors.toList(),
                         ImmutableDomainObjectSet::of

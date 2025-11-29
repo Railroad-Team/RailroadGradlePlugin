@@ -11,6 +11,7 @@ import org.gradle.tooling.model.GradleProject;
 import org.gradle.tooling.model.HierarchicalElement;
 import org.gradle.tooling.model.ProjectIdentifier;
 import org.gradle.tooling.model.internal.ImmutableDomainObjectSet;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
@@ -18,17 +19,9 @@ import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
-public class BasicRailroadModule implements RailroadModule {
-    private final Project project;
-    private final BasicRailroadProject parent;
-
-    public BasicRailroadModule(Project project, BasicRailroadProject parent) {
-        this.project = project;
-        this.parent = parent;
-    }
-
+public record BasicRailroadModule(Project project, BasicRailroadProject parent) implements RailroadModule {
     @Override
-    public @Nullable RailroadJavaLanguageSettings getJavaLanguageSettings() {
+    public @NotNull RailroadJavaLanguageSettings getJavaLanguageSettings() {
         return new BasicRailroadJavaLanguageSettings(project);
     }
 
@@ -55,7 +48,7 @@ public class BasicRailroadModule implements RailroadModule {
 
     @Override
     public GradleProject getGradleProject() {
-        return new BasicGradleProjectAdapter(project);
+        return new BasicGradleProjectAdapter(this, project);
     }
 
     @Override
@@ -65,7 +58,22 @@ public class BasicRailroadModule implements RailroadModule {
 
     @Override
     public DomainObjectSet<? extends HierarchicalElement> getChildren() {
-        return getConfigurations();
+        DomainObjectSet<? extends RailroadConfiguration> configurations = getConfigurations();
+        DomainObjectSet<? extends RailroadGradleTask> tasks = getTasks();
+        List<HierarchicalElement> children = new ArrayList<>();
+        children.addAll(configurations);
+        children.addAll(tasks);
+        return ImmutableDomainObjectSet.of(children);
+    }
+
+    @Override
+    public DomainObjectSet<? extends RailroadGradleTask> getTasks() {
+        return getGradleProject().getTasks().stream()
+                .map(RailroadGradleTask.class::cast)
+                .collect(Collectors.collectingAndThen(
+                        Collectors.toList(),
+                        ImmutableDomainObjectSet::of
+                ));
     }
 
     @Override
