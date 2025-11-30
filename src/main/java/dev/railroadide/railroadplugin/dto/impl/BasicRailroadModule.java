@@ -14,6 +14,7 @@ import org.gradle.tooling.model.internal.ImmutableDomainObjectSet;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -116,5 +117,15 @@ public record BasicRailroadModule(Project project, BasicRailroadProject parent) 
     @Override
     public @Nullable String getDescription() {
         return project.getDescription();
+    }
+
+    @Override
+    public String getPath() {
+        return project.getPath();
+    }
+
+    @Override
+    public Path getProjectDir() {
+        return project.getProjectDir().toPath();
     }
 }

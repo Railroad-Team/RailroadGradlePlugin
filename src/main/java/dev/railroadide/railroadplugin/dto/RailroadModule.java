@@ -6,6 +6,8 @@ import org.gradle.tooling.model.HasGradleProject;
 import org.gradle.tooling.model.HierarchicalElement;
 import org.jetbrains.annotations.Nullable;
 
+import java.nio.file.Path;
+
 public interface RailroadModule extends HierarchicalElement, HasGradleProject {
     @Nullable
     RailroadJavaLanguageSettings getJavaLanguageSettings();
@@ -16,4 +18,6 @@ public interface RailroadModule extends HierarchicalElement, HasGradleProject {
     RailroadCompilerOutput getCompilerOutput();
     DomainObjectSet<? extends RailroadConfiguration> getConfigurations();
     DomainObjectSet<? extends RailroadGradleTask> getTasks();
+    String getPath();
+    Path getProjectDir();
 }
