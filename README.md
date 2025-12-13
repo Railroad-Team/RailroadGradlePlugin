@@ -16,7 +16,7 @@ Gradle plugin that exposes project metadata to the Railroad IDE via the Tooling 
 2. Apply the plugin to your build:
    ```groovy
    plugins {
-       id "dev.railroadide.railroadgradleplugin" version "1.1.0"
+       id "dev.railroadide.railroadgradleplugin" version "1.0.0"
    }
    ```
 

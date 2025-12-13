@@ -4,12 +4,7 @@ plugins {
 }
 
 group = 'dev.railroadide'
-version = '1.2.1'
-description = 'Railroad Gradle plugin'
-
-base {
-    archivesName = 'railroad-plugin'
-}
+version = '1.0.0'
 
 java {
     toolchain {
@@ -34,31 +29,22 @@ dependencies {
 
 gradlePlugin {
     plugins {
-        railroad {
+        railroadProjectPlugin {
             id = 'dev.railroadide.railroadgradleplugin'
+            displayName = 'Railroad IDE Project Plugin'
+            description = 'Registers Railroad tooling models and documentation download tasks.'
             implementationClass = 'dev.railroadide.railroadplugin.RailroadProjectPlugin'
-            displayName = 'Railroad plugin'
-            description = 'Exposes tasks to help with Railroad IDE integration.'
-            tags.set(['railroad', 'ide', 'integration'])
         }
-
-        railroadSettings {
+        railroadSettingsPlugin {
             id = 'dev.railroadide.railroadgradleplugin.settings'
+            displayName = 'Railroad IDE Settings Plugin'
+            description = 'Captures Fabric Loom version during plugin management resolution.'
             implementationClass = 'dev.railroadide.railroadplugin.RailroadSettingsPlugin'
-            displayName = 'Railroad settings plugin'
-            description = 'Configures Railroad IDE integration at the settings level.'
-            tags.set(['railroad', 'ide', 'integration', 'settings'])
         }
     }
 }
 
 publishing {
-    publications {
-        withType(MavenPublication).configureEach {
-            artifactId = 'railroad-gradle-plugin'
-        }
-    }
-
     repositories {
         mavenLocal()
         maven {
