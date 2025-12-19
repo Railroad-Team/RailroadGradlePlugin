@@ -1,51 +1,30 @@
 package dev.railroadide.railroadplugin.dto.impl;
 
 import dev.railroadide.railroadplugin.dto.RailroadCompilerOutput;
-import org.gradle.api.Project;
-import org.gradle.api.plugins.JavaPlugin;
-import org.gradle.api.tasks.SourceSet;
-import org.gradle.api.tasks.SourceSetContainer;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
-import java.util.Optional;
+import java.io.Serial;
+import java.io.Serializable;
 
-public class BasicRailroadCompilerOutput implements RailroadCompilerOutput {
-    private final Project project;
-
-    public BasicRailroadCompilerOutput(Project project) {
-        this.project = project;
-    }
+public record BasicRailroadCompilerOutput(boolean inheritsOutputDirectories,
+                                          @Nullable File outputDirectory,
+                                          @Nullable File testOutputDirectory) implements RailroadCompilerOutput, Serializable {
+    @Serial
+    private static final long serialVersionUID = 1L;
 
     @Override
     public boolean inheritsOutputDirectories() {
-        return false;
+        return inheritsOutputDirectories;
     }
 
     @Override
     public @Nullable File getOutputDirectory() {
-        return findClassesDir(SourceSet.MAIN_SOURCE_SET_NAME);
+        return outputDirectory;
     }
 
     @Override
     public @Nullable File getTestOutputDirectory() {
-        return findClassesDir(SourceSet.TEST_SOURCE_SET_NAME);
-    }
-
-    private @Nullable File findClassesDir(String sourceSetName) {
-        if (!project.getPlugins().hasPlugin(JavaPlugin.class))
-            return null;
-
-        SourceSetContainer sourceSets = project.getExtensions().findByType(SourceSetContainer.class);
-        if (sourceSets == null)
-            return null;
-
-        SourceSet sourceSet = sourceSets.findByName(sourceSetName);
-        if (sourceSet == null)
-            return null;
-
-        return Optional.of(sourceSet.getOutput().getClassesDirs())
-                .flatMap(fileCollection -> fileCollection.getFiles().stream().findFirst())
-                .orElse(null);
+        return testOutputDirectory;
     }
 }

@@ -1,55 +1,53 @@
 package dev.railroadide.railroadplugin.dto.impl;
 
 import dev.railroadide.railroadplugin.dto.*;
-import org.gradle.api.Project;
-import org.gradle.api.artifacts.Configuration;
-import org.gradle.api.plugins.JavaPlugin;
-import org.gradle.api.tasks.SourceSetContainer;
-import org.gradle.tooling.internal.gradle.DefaultProjectIdentifier;
 import org.gradle.tooling.model.DomainObjectSet;
 import org.gradle.tooling.model.GradleProject;
 import org.gradle.tooling.model.HierarchicalElement;
 import org.gradle.tooling.model.ProjectIdentifier;
 import org.gradle.tooling.model.internal.ImmutableDomainObjectSet;
-import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.io.File;
+import java.io.Serial;
+import java.io.Serializable;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
-import java.util.stream.Collectors;
 
-public record BasicRailroadModule(Project project, BasicRailroadProject parent) implements RailroadModule {
+public record BasicRailroadModule(String name,
+                                  @Nullable String description,
+                                  String path,
+                                  File projectDir,
+                                  RailroadProject parent,
+                                  RailroadJavaLanguageSettings javaLanguageSettings,
+                                  RailroadCompilerOutput compilerOutput,
+                                  List<RailroadContentRoot> contentRoots,
+                                  List<RailroadConfiguration> configurations,
+                                  List<RailroadGradleTask> tasks,
+                                  GradleProject gradleProject,
+                                  ProjectIdentifier projectIdentifier) implements RailroadModule, Serializable {
+    @Serial
+    private static final long serialVersionUID = 1L;
+
     @Override
-    public @NotNull RailroadJavaLanguageSettings getJavaLanguageSettings() {
-        return new BasicRailroadJavaLanguageSettings(project);
+    public RailroadJavaLanguageSettings getJavaLanguageSettings() {
+        return javaLanguageSettings;
     }
 
     @Override
     public DomainObjectSet<? extends RailroadContentRoot> getContentRoots() {
-        if (!project.getPlugins().hasPlugin(JavaPlugin.class))
-            return BasicRailroadContentRoot.empty();
-
-        SourceSetContainer sourceSets = project.getExtensions().findByType(SourceSetContainer.class);
-        if (sourceSets == null)
-            return BasicRailroadContentRoot.empty();
-
-        return ImmutableDomainObjectSet.of(
-                sourceSets.stream()
-                        .map(sourceSet -> new BasicRailroadContentRoot(project, sourceSet))
-                        .collect(Collectors.toList())
-        );
+        return ImmutableDomainObjectSet.of(contentRoots);
     }
 
     @Override
     public ProjectIdentifier getProjectIdentifier() {
-        return new DefaultProjectIdentifier(project.getRootDir(), project.getPath());
+        return projectIdentifier;
     }
 
     @Override
     public GradleProject getGradleProject() {
-        return new BasicGradleProjectAdapter(this, project);
+        return gradleProject;
     }
 
     @Override
@@ -59,8 +57,6 @@ public record BasicRailroadModule(Project project, BasicRailroadProject parent) 
 
     @Override
     public DomainObjectSet<? extends HierarchicalElement> getChildren() {
-        DomainObjectSet<? extends RailroadConfiguration> configurations = getConfigurations();
-        DomainObjectSet<? extends RailroadGradleTask> tasks = getTasks();
         List<HierarchicalElement> children = new ArrayList<>();
         children.addAll(configurations);
         children.addAll(tasks);
@@ -69,12 +65,7 @@ public record BasicRailroadModule(Project project, BasicRailroadProject parent) 
 
     @Override
     public DomainObjectSet<? extends RailroadGradleTask> getTasks() {
-        return getGradleProject().getTasks().stream()
-                .map(RailroadGradleTask.class::cast)
-                .collect(Collectors.collectingAndThen(
-                        Collectors.toList(),
-                        ImmutableDomainObjectSet::of
-                ));
+        return ImmutableDomainObjectSet.of(tasks);
     }
 
     @Override
@@ -84,48 +75,31 @@ public record BasicRailroadModule(Project project, BasicRailroadProject parent) 
 
     @Override
     public RailroadCompilerOutput getCompilerOutput() {
-        return new BasicRailroadCompilerOutput(project);
+        return compilerOutput;
     }
 
     @Override
     public DomainObjectSet<? extends RailroadConfiguration> getConfigurations() {
-        return ImmutableDomainObjectSet.of(collectConfigurations(this, project));
-    }
-
-    public static List<RailroadConfiguration> collectConfigurations(RailroadModule module, Project project) {
-        List<RailroadConfiguration> configurations = new ArrayList<>();
-
-        for (Configuration configuration : project.getConfigurations()) {
-            if (!configuration.isCanBeResolved())
-                continue;
-
-            try {
-                configurations.add(new BasicRailroadConfiguration(module, configuration));
-            } catch (Exception exception) {
-                // TODO: LOGGER.warn("Failed to build dependency tree for configuration: {}", configuration.getName(), exception);
-            }
-        }
-
-        return Collections.unmodifiableList(configurations);
+        return ImmutableDomainObjectSet.of(configurations);
     }
 
     @Override
     public String getName() {
-        return project.getName();
+        return name;
     }
 
     @Override
     public @Nullable String getDescription() {
-        return project.getDescription();
+        return description;
     }
 
     @Override
     public String getPath() {
-        return project.getPath();
+        return path;
     }
 
     @Override
     public Path getProjectDir() {
-        return project.getProjectDir().toPath();
+        return projectDir.toPath();
     }
 }

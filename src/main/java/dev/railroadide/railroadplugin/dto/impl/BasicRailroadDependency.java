@@ -1,55 +1,59 @@
 package dev.railroadide.railroadplugin.dto.impl;
 
 import dev.railroadide.railroadplugin.dto.RailroadDependency;
-import org.gradle.api.artifacts.ModuleVersionIdentifier;
-import org.gradle.api.artifacts.ResolvedArtifact;
-import org.gradle.api.artifacts.component.ComponentIdentifier;
 import org.gradle.tooling.model.DomainObjectSet;
 import org.gradle.tooling.model.HierarchicalElement;
 import org.gradle.tooling.model.internal.ImmutableDomainObjectSet;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
+import java.io.Serial;
+import java.io.Serializable;
 import java.util.List;
 
-public class BasicRailroadDependency implements RailroadDependency {
-    private final HierarchicalElement parent;
-    private final ComponentIdentifier identifier;
-    private final ModuleVersionIdentifier moduleVersion;
-    private final ResolvedArtifact artifact;
-    private final List<RailroadDependency> children;
+public record BasicRailroadDependency(@Nullable HierarchicalElement parent,
+                                      String group,
+                                      String name,
+                                      String version,
+                                      File file,
+                                      @Nullable String description,
+                                      List<RailroadDependency> children) implements RailroadDependency, Serializable {
+    @Serial
+    private static final long serialVersionUID = 1L;
 
-    public BasicRailroadDependency(HierarchicalElement parent, ComponentIdentifier identifier, ModuleVersionIdentifier moduleVersion, ResolvedArtifact artifact, List<RailroadDependency> children) {
-        this.parent = parent;
-        this.identifier = identifier;
-        this.moduleVersion = moduleVersion;
-        this.artifact = artifact;
-        this.children = children;
+    public BasicRailroadDependency {
+        if (children == null)
+            children = List.of();
+        else
+            children = List.copyOf(children);
+
+        if (file == null)
+            file = new File("");
     }
 
     @Override
     public String getGroup() {
-        return moduleVersion.getGroup();
+        return group;
     }
 
     @Override
     public String getName() {
-        return moduleVersion.getName();
+        return name;
     }
 
     @Override
     public @Nullable String getDescription() {
-        return identifier.getDisplayName();
+        return description;
     }
 
     @Override
     public String getVersion() {
-        return moduleVersion.getVersion();
+        return version;
     }
 
     @Override
     public File getFile() {
-        return artifact.getFile();
+        return file;
     }
 
     @Override

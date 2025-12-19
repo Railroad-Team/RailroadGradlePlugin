@@ -12,16 +12,10 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
-public class BasicFabricModelBuilder implements ToolingModelBuilder {
-    private final String loomVersion;
-
-    public BasicFabricModelBuilder(String loomVersion) {
-        this.loomVersion = loomVersion;
-    }
-
+public record BasicFabricModelBuilder(String loomVersion) implements ToolingModelBuilder {
     @Override
     public boolean canBuild(String modelName) {
-        return modelName.equals("dev.railroadide.railroadplugin.model.BasicFabricModelBuilder");
+        return modelName.equals(FabricDataModel.class.getName());
     }
 
     @Override

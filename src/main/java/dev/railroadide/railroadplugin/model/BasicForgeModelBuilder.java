@@ -16,7 +16,7 @@ import java.util.Optional;
 public class BasicForgeModelBuilder implements ToolingModelBuilder {
     @Override
     public boolean canBuild(String modelName) {
-        return modelName.equals("dev.railroadide.railroadplugin.model.BasicForgeModelBuilder");
+        return modelName.equals(ForgeDataModel.class.getName());
     }
 
     @Override

@@ -3,17 +3,30 @@ package dev.railroadide.railroadplugin.dto.impl;
 import dev.railroadide.railroadplugin.dto.RailroadGradleTask;
 import dev.railroadide.railroadplugin.dto.RailroadGradleTaskArgument;
 import dev.railroadide.railroadplugin.dto.RailroadModule;
-import org.gradle.tooling.model.*;
+import org.gradle.tooling.model.DomainObjectSet;
+import org.gradle.tooling.model.GradleProject;
+import org.gradle.tooling.model.HierarchicalElement;
+import org.gradle.tooling.model.ProjectIdentifier;
+import org.gradle.tooling.model.internal.ImmutableDomainObjectSet;
 import org.jetbrains.annotations.Nullable;
 
-public class BasicRailroadGradleTask implements RailroadGradleTask {
-    private final RailroadModule module;
-    private final GradleTask delegate;
+import java.io.Serial;
+import java.io.Serializable;
+import java.util.List;
 
-    public BasicRailroadGradleTask(RailroadModule module, GradleTask delegate) {
-        this.module = module;
-        this.delegate = delegate;
-    }
+public record BasicRailroadGradleTask(RailroadModule module,
+                                      String path,
+                                      String buildTreePath,
+                                      String name,
+                                      ProjectIdentifier projectIdentifier,
+                                      String displayName,
+                                      @Nullable String description,
+                                      boolean isPublic,
+                                      @Nullable String group,
+                                      GradleProject project,
+                                      List<RailroadGradleTaskArgument> arguments) implements RailroadGradleTask, Serializable {
+    @Serial
+    private static final long serialVersionUID = 1L;
 
     @Override
     public RailroadModule module() {
@@ -22,12 +35,12 @@ public class BasicRailroadGradleTask implements RailroadGradleTask {
 
     @Override
     public DomainObjectSet<? extends RailroadGradleTaskArgument> getArguments() {
-        return null;
+        return ImmutableDomainObjectSet.of(arguments);
     }
 
     @Override
     public GradleProject getProject() {
-        return delegate.getProject();
+        return project;
     }
 
     @Override
@@ -42,42 +55,41 @@ public class BasicRailroadGradleTask implements RailroadGradleTask {
 
     @Override
     public String getPath() {
-        return delegate.getPath();
+        return path;
     }
 
-    @SuppressWarnings("UnstableApiUsage")
     @Override
     public String getBuildTreePath() {
-        return delegate.getBuildTreePath();
+        return buildTreePath;
     }
 
     @Override
     public String getName() {
-        return delegate.getName();
+        return name;
     }
 
     @Override
     public ProjectIdentifier getProjectIdentifier() {
-        return delegate.getProjectIdentifier();
+        return projectIdentifier;
     }
 
     @Override
     public String getDisplayName() {
-        return delegate.getDisplayName();
+        return displayName;
     }
 
     @Override
     public @Nullable String getDescription() {
-        return delegate.getDescription();
+        return description;
     }
 
     @Override
     public boolean isPublic() {
-        return delegate.isPublic();
+        return isPublic;
     }
 
     @Override
     public @Nullable String getGroup() {
-        return delegate.getGroup();
+        return group;
     }
 }

@@ -3,17 +3,14 @@ package dev.railroadide.railroadplugin.dto.impl;
 import dev.railroadide.railroadplugin.dto.RailroadSourceDirectory;
 
 import java.io.File;
+import java.io.Serial;
+import java.io.Serializable;
 
-public class BasicRailroadSourceDirectory implements RailroadSourceDirectory {
-    private final boolean generated;
-    private final File directory;
-    private final String type;
-
-    public BasicRailroadSourceDirectory(boolean generated, File directory, String type) {
-        this.generated = generated;
-        this.directory = directory;
-        this.type = type;
-    }
+public record BasicRailroadSourceDirectory(boolean generated,
+                                           File directory,
+                                           String type) implements RailroadSourceDirectory, Serializable {
+    @Serial
+    private static final long serialVersionUID = 1L;
 
     @Override
     public boolean isGenerated() {

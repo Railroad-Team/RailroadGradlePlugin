@@ -1,0 +1,365 @@
+package dev.railroadide.railroadplugin.dto;
+
+import dev.railroadide.railroadplugin.dto.impl.*;
+import org.gradle.api.JavaVersion;
+import org.gradle.api.Project;
+import org.gradle.api.Task;
+import org.gradle.api.artifacts.Configuration;
+import org.gradle.api.artifacts.ModuleVersionIdentifier;
+import org.gradle.api.artifacts.ResolvedArtifact;
+import org.gradle.api.artifacts.component.ComponentIdentifier;
+import org.gradle.api.artifacts.result.ResolutionResult;
+import org.gradle.api.artifacts.result.ResolvedComponentResult;
+import org.gradle.api.artifacts.result.ResolvedDependencyResult;
+import org.gradle.api.plugins.JavaPlugin;
+import org.gradle.api.plugins.JavaPluginExtension;
+import org.gradle.api.tasks.SourceSet;
+import org.gradle.api.tasks.SourceSetContainer;
+import org.gradle.api.tasks.SourceSetOutput;
+import org.gradle.tooling.internal.gradle.DefaultProjectIdentifier;
+import org.gradle.tooling.model.GradleProject;
+import org.gradle.tooling.model.GradleTask;
+import org.gradle.tooling.model.HierarchicalElement;
+import org.gradle.tooling.model.java.InstalledJdk;
+import org.jetbrains.annotations.Nullable;
+
+import java.io.File;
+import java.nio.file.Path;
+import java.util.*;
+
+public class DTOBuilder {
+    public static RailroadProject buildProject(Project project) {
+        return buildProject(project, project.getParent() == null
+                ? null
+                : buildProject(project.getParent()));
+    }
+
+    private static RailroadProject buildProject(Project project, @Nullable RailroadProject parentDto) {
+        List<RailroadModule> modules = new ArrayList<>();
+        RailroadJavaLanguageSettings javaLanguageSettings = buildJavaLanguageSettings(project);
+
+        var dto = new BasicRailroadProject(
+                project.getName(),
+                project.getDescription(),
+                parentDto,
+                modules,
+                javaLanguageSettings
+        );
+
+        for (Project sub : project.getAllprojects()) {
+            modules.add(buildModule(sub, dto));
+        }
+
+        return dto;
+    }
+
+    private static RailroadModule buildModule(Project project, RailroadProject parentProject) {
+        List<RailroadConfiguration> configurations = new ArrayList<>();
+        List<RailroadGradleTask> tasks = new ArrayList<>();
+        List<RailroadContentRoot> contentRoots = buildContentRoots(project);
+        RailroadJavaLanguageSettings javaLanguageSettings = buildJavaLanguageSettings(project);
+        RailroadCompilerOutput compilerOutput = buildCompilerOutput(project);
+
+        List<GradleTask> gradleTasks = new ArrayList<>();
+        var projectIdentifier = new DefaultProjectIdentifier(project.getRootDir(), project.getPath());
+        var gradleProject = new BasicGradleProject(
+                project.getName(),
+                project.getDescription(),
+                project.getPath(),
+                project.getProjectDir(),
+                project.getLayout().getBuildDirectory().getAsFile().getOrNull(),
+                new BasicGradleScriptAdapter(project.getBuildFile()),
+                projectIdentifier,
+                null,
+                Collections.emptyList(),
+                gradleTasks
+        );
+
+        var module = new BasicRailroadModule(
+                project.getName(),
+                project.getDescription(),
+                project.getPath(),
+                project.getProjectDir(),
+                parentProject,
+                javaLanguageSettings,
+                compilerOutput,
+                contentRoots,
+                configurations,
+                tasks,
+                gradleProject,
+                projectIdentifier
+        );
+
+        tasks.addAll(buildTasks(project, module, gradleProject, gradleTasks));
+        configurations.addAll(buildConfigurations(project, module));
+
+        return module;
+    }
+
+    private static RailroadCompilerOutput buildCompilerOutput(Project project) {
+        File outputDir = findClassesDir(project, SourceSet.MAIN_SOURCE_SET_NAME);
+        File testOutputDir = findClassesDir(project, SourceSet.TEST_SOURCE_SET_NAME);
+        return new BasicRailroadCompilerOutput(false, outputDir, testOutputDir);
+    }
+
+    private static File findClassesDir(Project project, String sourceSetName) {
+        if (!project.getPlugins().hasPlugin(JavaPlugin.class))
+            return null;
+
+        SourceSetContainer sourceSets = project.getExtensions().findByType(SourceSetContainer.class);
+        if (sourceSets == null)
+            return null;
+
+        SourceSet sourceSet = sourceSets.findByName(sourceSetName);
+        if (sourceSet == null)
+            return null;
+
+        return Optional.of(sourceSet.getOutput().getClassesDirs())
+                .flatMap(fileCollection -> fileCollection.getFiles().stream().findFirst())
+                .orElse(null);
+    }
+
+    private static RailroadJavaLanguageSettings buildJavaLanguageSettings(Project project) {
+        JavaPluginExtension javaExtension = project.getExtensions().findByType(JavaPluginExtension.class);
+        JavaVersion sourceCompatibility = javaExtension != null ? javaExtension.getSourceCompatibility() : null;
+        JavaVersion targetCompatibility = javaExtension != null ? javaExtension.getTargetCompatibility() : null;
+        InstalledJdk jdk = project.getExtensions().findByType(InstalledJdk.class);
+        InstalledJdk installedJdk = jdk == null ? null : new BasicInstalledJdk(jdk.getJavaVersion(), jdk.getJavaHome());
+        return new BasicRailroadJavaLanguageSettings(sourceCompatibility, targetCompatibility, installedJdk);
+    }
+
+    private static List<RailroadContentRoot> buildContentRoots(Project project) {
+        if (!project.getPlugins().hasPlugin(JavaPlugin.class))
+            return Collections.emptyList();
+
+        SourceSetContainer sourceSets = project.getExtensions().findByType(SourceSetContainer.class);
+        if (sourceSets == null)
+            return Collections.emptyList();
+
+        File buildDir = project.getLayout().getBuildDirectory().getAsFile().getOrNull();
+        List<RailroadContentRoot> roots = new ArrayList<>();
+
+        for (SourceSet sourceSet : sourceSets) {
+            List<RailroadSourceDirectory> sources = toSourceDirectories(sourceSet.getAllSource().getSrcDirs(), buildDir, "source");
+            List<RailroadSourceDirectory> testSources = toSourceDirectories(sourceSet.getAllJava().getSrcDirs(), buildDir, "testSource");
+            List<RailroadSourceDirectory> resources = toSourceDirectories(sourceSet.getResources().getSrcDirs(), buildDir, "resource");
+            List<RailroadSourceDirectory> testResources = toSourceDirectories(sourceSet.getResources().getSrcDirs(), buildDir, "testResource");
+            Set<File> excluded = collectExcludedDirectories(project, sourceSet);
+
+            roots.add(new BasicRailroadContentRoot(
+                    project.getProjectDir(),
+                    sources,
+                    testSources,
+                    resources,
+                    testResources,
+                    excluded
+            ));
+        }
+
+        return roots;
+    }
+
+    private static Set<File> collectExcludedDirectories(Project project, SourceSet sourceSet) {
+        Set<File> excluded = new LinkedHashSet<>();
+
+        File buildDir = project.getLayout().getBuildDirectory().getAsFile().getOrNull();
+        if (buildDir != null) {
+            excluded.add(buildDir);
+        }
+
+        File gradleDir = new File(project.getProjectDir(), ".gradle");
+        if (gradleDir.exists()) {
+            excluded.add(gradleDir);
+        }
+
+        SourceSetOutput output = sourceSet.getOutput();
+        excluded.addAll(output.getClassesDirs().getFiles());
+        File resourcesOutput = output.getResourcesDir();
+        if (resourcesOutput != null) {
+            excluded.add(resourcesOutput);
+        }
+
+        return Collections.unmodifiableSet(excluded);
+    }
+
+    private static List<RailroadSourceDirectory> toSourceDirectories(Set<File> dirs, @Nullable File buildDir, String type) {
+        return dirs.stream()
+                .map(dir -> new BasicRailroadSourceDirectory(isGenerated(buildDir, dir), dir, type))
+                .map(RailroadSourceDirectory.class::cast)
+                .toList();
+    }
+
+    private static boolean isGenerated(@Nullable File buildDir, File dir) {
+        if (buildDir == null)
+            return false;
+
+        Path buildPath = buildDir.toPath().toAbsolutePath().normalize();
+        Path dirPath = dir.toPath().toAbsolutePath().normalize();
+        if (!dirPath.startsWith(buildPath))
+            return false;
+
+        Path relative = buildPath.relativize(dirPath);
+        for (Path segment : relative) {
+            if ("generated".equalsIgnoreCase(segment.toString()))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static List<RailroadConfiguration> buildConfigurations(Project project, RailroadModule module) {
+        List<RailroadConfiguration> configurations = new ArrayList<>();
+
+        for (Configuration configuration : project.getConfigurations()) {
+            if (!configuration.isCanBeResolved())
+                continue;
+
+            try {
+                List<RailroadDependency> dependencies = collectDependencies(module, configuration);
+                configurations.add(new BasicRailroadConfiguration(
+                        configuration.getName(),
+                        configuration.getDescription(),
+                        module,
+                        dependencies
+                ));
+            } catch (Exception ignored) {
+                // Swallow individual configuration failures to mirror previous behaviour.
+            }
+        }
+
+        return configurations;
+    }
+
+    private static List<RailroadDependency> collectDependencies(HierarchicalElement parent, Configuration configuration) {
+        Map<ModuleVersionIdentifier, ResolvedArtifact> artifactPaths = indexArtifacts(configuration);
+        ResolutionResult resolutionResult = configuration.getIncoming().getResolutionResult();
+        ResolvedComponentResult root = resolutionResult.getRoot();
+
+        return root.getDependencies().stream()
+                .filter(dependencyResult -> dependencyResult instanceof ResolvedDependencyResult)
+                .map(ResolvedDependencyResult.class::cast)
+                .map(result -> buildNode(parent, result.getSelected(), artifactPaths, new HashSet<>()))
+                .toList();
+    }
+
+    private static RailroadDependency buildNode(HierarchicalElement parent,
+                                                ResolvedComponentResult component,
+                                                Map<ModuleVersionIdentifier, ResolvedArtifact> artifactPaths,
+                                                Set<ComponentIdentifier> visiting) {
+        ComponentIdentifier identifier = component.getId();
+        ModuleVersionIdentifier moduleVersion = component.getModuleVersion();
+
+        if (!visiting.add(identifier)) {
+            return new BasicRailroadDependency(
+                    parent,
+                    moduleVersion.getGroup(),
+                    moduleVersion.getName(),
+                    moduleVersion.getVersion(),
+                    Optional.ofNullable(artifactPaths.get(moduleVersion)).map(ResolvedArtifact::getFile).orElse(new File("")),
+                    identifier.getDisplayName(),
+                    Collections.emptyList()
+            );
+        }
+
+        List<RailroadDependency> children = new ArrayList<>();
+
+        var dependency = new BasicRailroadDependency(
+                parent,
+                moduleVersion.getGroup(),
+                moduleVersion.getName(),
+                moduleVersion.getVersion(),
+                Optional.ofNullable(artifactPaths.get(moduleVersion)).map(ResolvedArtifact::getFile).orElse(new File("")),
+                identifier.getDisplayName(),
+                children
+        );
+
+        component.getDependencies().stream()
+                .filter(dependencyResult -> dependencyResult instanceof ResolvedDependencyResult)
+                .map(ResolvedDependencyResult.class::cast)
+                .map(result -> buildNode(dependency, result.getSelected(), artifactPaths, visiting))
+                .forEach(children::add);
+        visiting.remove(identifier);
+        return dependency;
+    }
+
+    private static Map<ModuleVersionIdentifier, ResolvedArtifact> indexArtifacts(Configuration configuration) {
+        Collection<ResolvedArtifact> artifacts = configuration.getResolvedConfiguration().getResolvedArtifacts();
+        Map<ModuleVersionIdentifier, ResolvedArtifact> index = new HashMap<>(artifacts.size());
+
+        for (ResolvedArtifact artifact : artifacts) {
+            ModuleVersionIdentifier id = artifact.getModuleVersion().getId();
+            index.putIfAbsent(id, artifact);
+        }
+
+        return index;
+    }
+
+    private static List<RailroadGradleTask> buildTasks(Project project,
+                                                       RailroadModule module,
+                                                       GradleProject gradleProject,
+                                                       List<GradleTask> gradleTasks) {
+        List<RailroadGradleTask> tasks = new ArrayList<>();
+
+        for (Task task : project.getTasks()) {
+            List<RailroadGradleTaskArgument> arguments = new ArrayList<>();
+            var taskDto = new BasicRailroadGradleTask(
+                    module,
+                    task.getPath(),
+                    task.getPath(),
+                    task.getName(),
+                    new DefaultProjectIdentifier(project.getRootDir(), project.getPath()),
+                    task.getName(),
+                    task.getDescription(),
+                    task.getGroup() != null,
+                    task.getGroup(),
+                    gradleProject,
+                    arguments
+            );
+            arguments.addAll(buildTaskArguments(taskDto, task));
+            tasks.add(taskDto);
+            gradleTasks.add(taskDto);
+        }
+
+        return tasks;
+    }
+
+    private static List<RailroadGradleTaskArgument> buildTaskArguments(RailroadGradleTask taskDto, Task task) {
+        var optionReader = new org.gradle.api.internal.tasks.options.OptionReader();
+        Map<String, org.gradle.api.internal.tasks.options.OptionDescriptor> options = optionReader.getOptions(task);
+        List<RailroadGradleTaskArgument> arguments = new ArrayList<>(options.size());
+
+        for (org.gradle.api.internal.tasks.options.OptionDescriptor option : options.values()) {
+            arguments.add(new BasicRailroadGradleTaskArgument(
+                    taskDto,
+                    option.getName(),
+                    option.getName(),
+                    toArgumentType(option.getArgumentType()),
+                    option.getArgumentType() != null ? option.getArgumentType().getName() : null,
+                    option.getDescription(),
+                    option.getAvailableValues(),
+                    option.isClashing()
+            ));
+        }
+
+        return arguments;
+    }
+
+    private static RailroadGradleTaskArgument.GradleTaskArgumentType toArgumentType(Class<?> argType) {
+        if (argType == null)
+            return RailroadGradleTaskArgument.GradleTaskArgumentType.UNKNOWN;
+
+        if (argType == Boolean.class || argType == boolean.class) {
+            return RailroadGradleTaskArgument.GradleTaskArgumentType.BOOLEAN;
+        } else if (argType.isEnum()) {
+            return RailroadGradleTaskArgument.GradleTaskArgumentType.ENUM;
+        } else if (argType.isPrimitive() || Number.class.isAssignableFrom(argType)) {
+            return RailroadGradleTaskArgument.GradleTaskArgumentType.NUMBER;
+        } else if (argType == String.class) {
+            return RailroadGradleTaskArgument.GradleTaskArgumentType.STRING;
+        } else if (argType == File.class || argType == Path.class) {
+            return RailroadGradleTaskArgument.GradleTaskArgumentType.FILE;
+        } else {
+            return RailroadGradleTaskArgument.GradleTaskArgumentType.UNKNOWN;
+        }
+    }
+}

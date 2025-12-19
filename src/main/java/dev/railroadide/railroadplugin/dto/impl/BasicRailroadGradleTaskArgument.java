@@ -2,16 +2,25 @@ package dev.railroadide.railroadplugin.dto.impl;
 
 import dev.railroadide.railroadplugin.dto.RailroadGradleTask;
 import dev.railroadide.railroadplugin.dto.RailroadGradleTaskArgument;
-import org.gradle.api.internal.tasks.options.OptionDescriptor;
 import org.gradle.tooling.model.HierarchicalElement;
 import org.jetbrains.annotations.Nullable;
 
-import java.io.File;
-import java.nio.file.Path;
+import java.io.Serial;
+import java.io.Serializable;
+import java.util.Collections;
 import java.util.Set;
 
 public record BasicRailroadGradleTaskArgument(RailroadGradleTask gradleTask,
-                                              OptionDescriptor option) implements RailroadGradleTaskArgument {
+                                              String name,
+                                              String displayName,
+                                              @Nullable GradleTaskArgumentType type,
+                                              String valueClassName,
+                                              String description,
+                                              Set<String> possibleValues,
+                                              boolean clashing) implements RailroadGradleTaskArgument, Serializable {
+    @Serial
+    private static final long serialVersionUID = 1L;
+
     @Override
     public RailroadGradleTask getTask() {
         return gradleTask;
@@ -19,50 +28,57 @@ public record BasicRailroadGradleTaskArgument(RailroadGradleTask gradleTask,
 
     @Override
     public String getName() {
-        return option.getName();
+        return name;
     }
 
     @Override
     public String getDisplayName() {
-        return option.getName();
+        return displayName;
     }
 
     @Override
-    public GradleTaskArgumentType getType() {
-        Class<?> argType = option.getArgumentType();
-        if (argType == Boolean.class || argType == boolean.class) {
-            return GradleTaskArgumentType.BOOLEAN;
-        } else if (argType.isEnum()) {
-            return GradleTaskArgumentType.ENUM;
-        } else if (argType.isPrimitive() || Number.class.isAssignableFrom(argType)) {
-            return GradleTaskArgumentType.NUMBER;
-        } else if (argType == String.class) {
-            return GradleTaskArgumentType.STRING;
-        } else if (argType == File.class || argType == Path.class) {
-            return GradleTaskArgumentType.FILE;
-        } else {
-            return GradleTaskArgumentType.UNKNOWN;
-        }
+    public @Nullable GradleTaskArgumentType getType() {
+        return type;
     }
 
     @Override
     public Class<?> getValueClass() {
-        return option.getArgumentType();
+        if (valueClassName == null)
+            return null;
+
+        return switch (valueClassName) {
+            case "boolean" -> boolean.class;
+            case "byte" -> byte.class;
+            case "short" -> short.class;
+            case "int" -> int.class;
+            case "long" -> long.class;
+            case "char" -> char.class;
+            case "float" -> float.class;
+            case "double" -> double.class;
+            case "void" -> Void.TYPE;
+            default -> {
+                try {
+                    yield Class.forName(valueClassName);
+                } catch (ClassNotFoundException e) {
+                    yield null;
+                }
+            }
+        };
     }
 
     @Override
     public String getDescription() {
-        return option.getDescription();
+        return description;
     }
 
     @Override
     public Set<String> getPossibleValues() {
-        return option.getAvailableValues();
+        return possibleValues == null ? Collections.emptySet() : Collections.unmodifiableSet(possibleValues);
     }
 
     @Override
     public boolean isClashing() {
-        return option.isClashing();
+        return clashing;
     }
 
     @Override

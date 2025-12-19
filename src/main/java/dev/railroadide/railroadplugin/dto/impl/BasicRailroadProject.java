@@ -3,59 +3,55 @@ package dev.railroadide.railroadplugin.dto.impl;
 import dev.railroadide.railroadplugin.dto.RailroadJavaLanguageSettings;
 import dev.railroadide.railroadplugin.dto.RailroadModule;
 import dev.railroadide.railroadplugin.dto.RailroadProject;
-import org.gradle.api.Project;
 import org.gradle.tooling.model.DomainObjectSet;
 import org.gradle.tooling.model.HierarchicalElement;
 import org.gradle.tooling.model.internal.ImmutableDomainObjectSet;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.stream.Collectors;
+import java.io.Serial;
+import java.io.Serializable;
+import java.util.List;
 
-public class BasicRailroadProject implements RailroadProject {
-    private final Project project;
+public record BasicRailroadProject(String name, @Nullable String description, @Nullable RailroadProject parent,
+                                   List<RailroadModule> modules,
+                                   RailroadJavaLanguageSettings javaLanguageSettings) implements RailroadProject, Serializable {
+    @Serial
+    private static final long serialVersionUID = 1L;
 
-    public BasicRailroadProject(Project project) {
-        this.project = project;
+    public BasicRailroadProject(String name,
+                                @Nullable String description,
+                                @Nullable RailroadProject parent,
+                                List<RailroadModule> modules,
+                                RailroadJavaLanguageSettings javaLanguageSettings) {
+        this.name = name;
+        this.description = description;
+        this.parent = parent;
+        this.modules = modules;
+        this.javaLanguageSettings = javaLanguageSettings;
     }
 
     @Override
-    public RailroadJavaLanguageSettings getJavaLanguageSettings() {
-        return new BasicRailroadJavaLanguageSettings(project);
+    public String getName() {
+        return name;
+    }
+
+    @Override
+    public @Nullable String getDescription() {
+        return description;
     }
 
     @Override
     public @Nullable HierarchicalElement getParent() {
-        return project.getParent() != null ? new BasicRailroadProject(project.getParent()) : null;
+        return parent;
+    }
+
+    @Override
+    public DomainObjectSet<? extends RailroadModule> getModules() {
+        return ImmutableDomainObjectSet.of(modules);
     }
 
     @Override
     public DomainObjectSet<? extends RailroadModule> getChildren() {
         return getModules();
-    }
-
-    @Override
-    public DomainObjectSet<? extends RailroadModule> getModules() {
-        return project.getSubprojects()
-                .stream()
-                .map(project -> new BasicRailroadModule(project, this))
-                .collect(Collectors.collectingAndThen(
-                        Collectors.toList(),
-                        ImmutableDomainObjectSet::of
-                ));
-    }
-
-    @Override
-    public String getName() {
-        return project.getName();
-    }
-
-    @Override
-    public @Nullable String getDescription() {
-        return project.getDescription();
-    }
-
-    @Override
-    public boolean hasPlugin(String pluginId) {
-        return project.getPlugins().hasPlugin(pluginId);
     }
 }
