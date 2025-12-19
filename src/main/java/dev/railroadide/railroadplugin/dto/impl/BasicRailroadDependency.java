@@ -21,16 +21,6 @@ public record BasicRailroadDependency(@Nullable HierarchicalElement parent,
     @Serial
     private static final long serialVersionUID = 1L;
 
-    public BasicRailroadDependency {
-        if (children == null)
-            children = List.of();
-        else
-            children = List.copyOf(children);
-
-        if (file == null)
-            file = new File("");
-    }
-
     @Override
     public String getGroup() {
         return group;

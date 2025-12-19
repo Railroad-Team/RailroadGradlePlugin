@@ -11,6 +11,8 @@ import org.gradle.api.artifacts.component.ComponentIdentifier;
 import org.gradle.api.artifacts.result.ResolutionResult;
 import org.gradle.api.artifacts.result.ResolvedComponentResult;
 import org.gradle.api.artifacts.result.ResolvedDependencyResult;
+import org.gradle.api.internal.tasks.options.OptionDescriptor;
+import org.gradle.api.internal.tasks.options.OptionReader;
 import org.gradle.api.plugins.JavaPlugin;
 import org.gradle.api.plugins.JavaPluginExtension;
 import org.gradle.api.tasks.SourceSet;
@@ -20,18 +22,18 @@ import org.gradle.tooling.internal.gradle.DefaultProjectIdentifier;
 import org.gradle.tooling.model.GradleProject;
 import org.gradle.tooling.model.GradleTask;
 import org.gradle.tooling.model.HierarchicalElement;
+import org.gradle.tooling.model.ProjectIdentifier;
 import org.gradle.tooling.model.java.InstalledJdk;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.function.Supplier;
 
 public class DTOBuilder {
     public static RailroadProject buildProject(Project project) {
-        return buildProject(project, project.getParent() == null
-                ? null
-                : buildProject(project.getParent()));
+        return buildProject(project, buildProjectReference(project.getParent()));
     }
 
     private static RailroadProject buildProject(Project project, @Nullable RailroadProject parentDto) {
@@ -47,7 +49,7 @@ public class DTOBuilder {
         );
 
         for (Project sub : project.getAllprojects()) {
-            modules.add(buildModule(sub, dto));
+            modules.add(buildModule(sub, buildProjectReference(dto)));
         }
 
         return dto;
@@ -60,8 +62,9 @@ public class DTOBuilder {
         RailroadJavaLanguageSettings javaLanguageSettings = buildJavaLanguageSettings(project);
         RailroadCompilerOutput compilerOutput = buildCompilerOutput(project);
 
-        List<GradleTask> gradleTasks = new ArrayList<>();
         var projectIdentifier = new DefaultProjectIdentifier(project.getRootDir(), project.getPath());
+        var gradleProjectRef = buildGradleProjectReference(project, projectIdentifier);
+        List<GradleTask> gradleTasks = new ArrayList<>();
         var gradleProject = new BasicGradleProject(
                 project.getName(),
                 project.getDescription(),
@@ -73,6 +76,16 @@ public class DTOBuilder {
                 null,
                 Collections.emptyList(),
                 gradleTasks
+        );
+
+        Supplier<RailroadModule> moduleRefSupplier = () -> buildModuleReference(
+                project,
+                parentProject,
+                javaLanguageSettings,
+                compilerOutput,
+                contentRoots,
+                gradleProjectRef,
+                projectIdentifier
         );
 
         var module = new BasicRailroadModule(
@@ -90,8 +103,8 @@ public class DTOBuilder {
                 projectIdentifier
         );
 
-        tasks.addAll(buildTasks(project, module, gradleProject, gradleTasks));
-        configurations.addAll(buildConfigurations(project, module));
+        tasks.addAll(buildTasks(project, moduleRefSupplier, gradleProjectRef, gradleTasks));
+        configurations.addAll(buildConfigurations(project, moduleRefSupplier));
 
         return module;
     }
@@ -207,7 +220,7 @@ public class DTOBuilder {
         return false;
     }
 
-    private static List<RailroadConfiguration> buildConfigurations(Project project, RailroadModule module) {
+    private static List<RailroadConfiguration> buildConfigurations(Project project, Supplier<RailroadModule> moduleSupplier) {
         List<RailroadConfiguration> configurations = new ArrayList<>();
 
         for (Configuration configuration : project.getConfigurations()) {
@@ -215,11 +228,16 @@ public class DTOBuilder {
                 continue;
 
             try {
-                List<RailroadDependency> dependencies = collectDependencies(module, configuration);
+                RailroadModule moduleRef = moduleSupplier.get();
+                Supplier<HierarchicalElement> configurationRefSupplier = () -> buildConfigurationReference(
+                        configuration,
+                        moduleRef
+                );
+                List<RailroadDependency> dependencies = collectDependencies(configurationRefSupplier, configuration);
                 configurations.add(new BasicRailroadConfiguration(
                         configuration.getName(),
                         configuration.getDescription(),
-                        module,
+                        moduleRef,
                         dependencies
                 ));
             } catch (Exception ignored) {
@@ -230,7 +248,8 @@ public class DTOBuilder {
         return configurations;
     }
 
-    private static List<RailroadDependency> collectDependencies(HierarchicalElement parent, Configuration configuration) {
+    private static List<RailroadDependency> collectDependencies(Supplier<HierarchicalElement> parentSupplier,
+                                                                Configuration configuration) {
         Map<ModuleVersionIdentifier, ResolvedArtifact> artifactPaths = indexArtifacts(configuration);
         ResolutionResult resolutionResult = configuration.getIncoming().getResolutionResult();
         ResolvedComponentResult root = resolutionResult.getRoot();
@@ -238,7 +257,7 @@ public class DTOBuilder {
         return root.getDependencies().stream()
                 .filter(dependencyResult -> dependencyResult instanceof ResolvedDependencyResult)
                 .map(ResolvedDependencyResult.class::cast)
-                .map(result -> buildNode(parent, result.getSelected(), artifactPaths, new HashSet<>()))
+                .map(result -> buildNode(parentSupplier.get(), result.getSelected(), artifactPaths, new HashSet<>()))
                 .toList();
     }
 
@@ -263,6 +282,22 @@ public class DTOBuilder {
 
         List<RailroadDependency> children = new ArrayList<>();
 
+        var dependencyRef = buildDependencyReference(
+                parent,
+                moduleVersion,
+                artifactPaths,
+                identifier
+        );
+
+        component.getDependencies().stream()
+                .filter(dependencyResult -> dependencyResult instanceof ResolvedDependencyResult)
+                .map(ResolvedDependencyResult.class::cast)
+                .map(result -> buildNode(dependencyRef,
+                        result.getSelected(),
+                        artifactPaths,
+                        visiting))
+                .forEach(children::add);
+
         var dependency = new BasicRailroadDependency(
                 parent,
                 moduleVersion.getGroup(),
@@ -273,11 +308,6 @@ public class DTOBuilder {
                 children
         );
 
-        component.getDependencies().stream()
-                .filter(dependencyResult -> dependencyResult instanceof ResolvedDependencyResult)
-                .map(ResolvedDependencyResult.class::cast)
-                .map(result -> buildNode(dependency, result.getSelected(), artifactPaths, visiting))
-                .forEach(children::add);
         visiting.remove(identifier);
         return dependency;
     }
@@ -295,15 +325,29 @@ public class DTOBuilder {
     }
 
     private static List<RailroadGradleTask> buildTasks(Project project,
-                                                       RailroadModule module,
+                                                       Supplier<RailroadModule> moduleSupplier,
                                                        GradleProject gradleProject,
                                                        List<GradleTask> gradleTasks) {
         List<RailroadGradleTask> tasks = new ArrayList<>();
 
         for (Task task : project.getTasks()) {
+            RailroadModule moduleRef = moduleSupplier.get();
+            var taskRef = new BasicRailroadGradleTask(
+                    moduleRef,
+                    task.getPath(),
+                    task.getPath(),
+                    task.getName(),
+                    new DefaultProjectIdentifier(project.getRootDir(), project.getPath()),
+                    task.getName(),
+                    task.getDescription(),
+                    task.getGroup() != null,
+                    task.getGroup(),
+                    gradleProject,
+                    Collections.emptyList()
+            );
             List<RailroadGradleTaskArgument> arguments = new ArrayList<>();
             var taskDto = new BasicRailroadGradleTask(
-                    module,
+                    moduleRef,
                     task.getPath(),
                     task.getPath(),
                     task.getName(),
@@ -315,20 +359,22 @@ public class DTOBuilder {
                     gradleProject,
                     arguments
             );
-            arguments.addAll(buildTaskArguments(taskDto, task));
+            arguments.addAll(buildTaskArguments(() -> buildTaskReference(task, moduleRef, gradleProject), task));
             tasks.add(taskDto);
-            gradleTasks.add(taskDto);
+            gradleTasks.add(taskRef);
         }
 
         return tasks;
     }
 
-    private static List<RailroadGradleTaskArgument> buildTaskArguments(RailroadGradleTask taskDto, Task task) {
-        var optionReader = new org.gradle.api.internal.tasks.options.OptionReader();
-        Map<String, org.gradle.api.internal.tasks.options.OptionDescriptor> options = optionReader.getOptions(task);
+    private static List<RailroadGradleTaskArgument> buildTaskArguments(Supplier<RailroadGradleTask> taskSupplier,
+                                                                       Task task) {
+        var optionReader = new OptionReader();
+        Map<String, OptionDescriptor> options = optionReader.getOptions(task);
         List<RailroadGradleTaskArgument> arguments = new ArrayList<>(options.size());
 
-        for (org.gradle.api.internal.tasks.options.OptionDescriptor option : options.values()) {
+        for (OptionDescriptor option : options.values()) {
+            RailroadGradleTask taskDto = taskSupplier.get();
             arguments.add(new BasicRailroadGradleTaskArgument(
                     taskDto,
                     option.getName(),
@@ -361,5 +407,119 @@ public class DTOBuilder {
         } else {
             return RailroadGradleTaskArgument.GradleTaskArgumentType.UNKNOWN;
         }
+    }
+
+    private static @Nullable RailroadProject buildProjectReference(@Nullable Project project) {
+        if (project == null)
+            return null;
+
+        return new BasicRailroadProject(
+                project.getName(),
+                project.getDescription(),
+                buildProjectReference(project.getParent()),
+                Collections.emptyList(),
+                buildJavaLanguageSettings(project)
+        );
+    }
+
+    private static @Nullable RailroadProject buildProjectReference(@Nullable RailroadProject project) {
+        if (project == null)
+            return null;
+
+        RailroadProject parent = null;
+        HierarchicalElement parentElement = project.getParent();
+        if (parentElement instanceof RailroadProject parentProject) {
+            parent = buildProjectReference(parentProject);
+        }
+
+        return new BasicRailroadProject(
+                project.getName(),
+                project.getDescription(),
+                parent,
+                Collections.emptyList(),
+                project.javaLanguageSettings()
+        );
+    }
+
+    private static BasicGradleProject buildGradleProjectReference(Project project,
+                                                                  ProjectIdentifier projectIdentifier) {
+        return new BasicGradleProject(
+                project.getName(),
+                project.getDescription(),
+                project.getPath(),
+                project.getProjectDir(),
+                project.getLayout().getBuildDirectory().getAsFile().getOrNull(),
+                new BasicGradleScriptAdapter(project.getBuildFile()),
+                projectIdentifier,
+                null,
+                Collections.emptyList(),
+                Collections.emptyList()
+        );
+    }
+
+    private static RailroadModule buildModuleReference(Project project,
+                                                       RailroadProject parentProject,
+                                                       RailroadJavaLanguageSettings javaLanguageSettings,
+                                                       RailroadCompilerOutput compilerOutput,
+                                                       List<RailroadContentRoot> contentRoots,
+                                                       GradleProject gradleProjectRef,
+                                                       ProjectIdentifier projectIdentifier) {
+        return new BasicRailroadModule(
+                project.getName(),
+                project.getDescription(),
+                project.getPath(),
+                project.getProjectDir(),
+                parentProject,
+                javaLanguageSettings,
+                compilerOutput,
+                contentRoots,
+                Collections.emptyList(),
+                Collections.emptyList(),
+                gradleProjectRef,
+                projectIdentifier
+        );
+    }
+
+    private static RailroadConfiguration buildConfigurationReference(Configuration configuration,
+                                                                     RailroadModule module) {
+        return new BasicRailroadConfiguration(
+                configuration.getName(),
+                configuration.getDescription(),
+                module,
+                Collections.emptyList()
+        );
+    }
+
+    private static RailroadGradleTask buildTaskReference(Task task,
+                                                         RailroadModule module,
+                                                         GradleProject gradleProject) {
+        return new BasicRailroadGradleTask(
+                module,
+                task.getPath(),
+                task.getPath(),
+                task.getName(),
+                new DefaultProjectIdentifier(task.getProject().getRootDir(), task.getProject().getPath()),
+                task.getName(),
+                task.getDescription(),
+                task.getGroup() != null,
+                task.getGroup(),
+                gradleProject,
+                Collections.emptyList()
+        );
+    }
+
+    private static RailroadDependency buildDependencyReference(HierarchicalElement parent,
+                                                               ModuleVersionIdentifier moduleVersion,
+                                                               Map<ModuleVersionIdentifier, ResolvedArtifact> artifactPaths,
+                                                               ComponentIdentifier identifier) {
+        return new BasicRailroadDependency(
+                parent,
+                moduleVersion.getGroup(),
+                moduleVersion.getName(),
+                moduleVersion.getVersion(),
+                Optional.ofNullable(artifactPaths.get(moduleVersion)).map(ResolvedArtifact::getFile).orElse(new File("")),
+                identifier.getDisplayName(),
+                Collections.emptyList()
+        );
     }
 }

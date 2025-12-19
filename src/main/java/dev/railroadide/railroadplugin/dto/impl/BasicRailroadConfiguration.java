@@ -35,7 +35,7 @@ public record BasicRailroadConfiguration(String name,
     }
 
     @Override
-    public @Nullable HierarchicalElement getParent() {
+    public @Nullable RailroadModule getParent() {
         return parent;
     }
 
