@@ -60,4 +60,9 @@ public record BasicRailroadDependency(@Nullable HierarchicalElement parent,
     public boolean isTransitive() {
         return !children.isEmpty();
     }
+
+    @Override
+    public int hashCode() {
+        return (group + ":" + name + ":" + version).hashCode();
+    }
 }
