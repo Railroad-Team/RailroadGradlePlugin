@@ -11,9 +11,16 @@ import org.jetbrains.annotations.Nullable;
 import java.io.Serial;
 import java.io.Serializable;
 import java.util.List;
+import java.util.Map;
 
 public record BasicRailroadConfiguration(String name,
                                          @Nullable String description,
+                                         boolean canBeResolved,
+                                         boolean canBeConsumed,
+                                         boolean visible,
+                                         boolean transitive,
+                                         List<String> extendsFrom,
+                                         Map<String, String> attributes,
                                          RailroadModule parent,
                                          List<RailroadDependency> dependencies) implements RailroadConfiguration, Serializable {
     @Serial
@@ -27,6 +34,36 @@ public record BasicRailroadConfiguration(String name,
     @Override
     public @Nullable String getDescription() {
         return description;
+    }
+
+    @Override
+    public boolean isCanBeResolved() {
+        return canBeResolved;
+    }
+
+    @Override
+    public boolean isCanBeConsumed() {
+        return canBeConsumed;
+    }
+
+    @Override
+    public boolean isVisible() {
+        return visible;
+    }
+
+    @Override
+    public boolean isTransitive() {
+        return transitive;
+    }
+
+    @Override
+    public List<String> getExtendsFrom() {
+        return List.copyOf(extendsFrom);
+    }
+
+    @Override
+    public Map<String, String> getAttributes() {
+        return Map.copyOf(attributes);
     }
 
     @Override

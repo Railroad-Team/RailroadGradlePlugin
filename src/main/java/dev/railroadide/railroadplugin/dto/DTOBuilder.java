@@ -11,6 +11,8 @@ import org.gradle.api.artifacts.component.ComponentIdentifier;
 import org.gradle.api.artifacts.result.ResolutionResult;
 import org.gradle.api.artifacts.result.ResolvedComponentResult;
 import org.gradle.api.artifacts.result.ResolvedDependencyResult;
+import org.gradle.api.attributes.Attribute;
+import org.gradle.api.attributes.AttributeContainer;
 import org.gradle.api.internal.tasks.options.OptionDescriptor;
 import org.gradle.api.internal.tasks.options.OptionReader;
 import org.gradle.api.plugins.JavaPlugin;
@@ -27,9 +29,12 @@ import org.gradle.tooling.model.java.InstalledJdk;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.function.Supplier;
+import java.util.jar.JarFile;
+import java.util.jar.Manifest;
 
 public class DTOBuilder {
     public static RailroadProject buildProject(Project project) {
@@ -61,6 +66,9 @@ public class DTOBuilder {
         List<RailroadContentRoot> contentRoots = buildContentRoots(project);
         RailroadJavaLanguageSettings javaLanguageSettings = buildJavaLanguageSettings(project);
         RailroadCompilerOutput compilerOutput = buildCompilerOutput(project);
+        List<File> dependencyRoots = buildDependencyRoots(project);
+        List<File> classpathRoots = buildClasspathRoots(project);
+        List<File> modulePathRoots = buildModulePathRoots(classpathRoots);
 
         var projectIdentifier = new DefaultProjectIdentifier(project.getRootDir(), project.getPath());
         var gradleProjectRef = buildGradleProjectReference(project, projectIdentifier);
@@ -97,6 +105,9 @@ public class DTOBuilder {
                 javaLanguageSettings,
                 compilerOutput,
                 contentRoots,
+                dependencyRoots,
+                classpathRoots,
+                modulePathRoots,
                 configurations,
                 tasks,
                 gradleProject,
@@ -113,6 +124,43 @@ public class DTOBuilder {
         File outputDir = findClassesDir(project, SourceSet.MAIN_SOURCE_SET_NAME);
         File testOutputDir = findClassesDir(project, SourceSet.TEST_SOURCE_SET_NAME);
         return new BasicRailroadCompilerOutput(false, outputDir, testOutputDir);
+    }
+
+    private static List<File> buildDependencyRoots(Project project) {
+        LinkedHashSet<File> roots = new LinkedHashSet<>();
+        for (Configuration configuration : project.getConfigurations()) {
+            if (!configuration.isCanBeResolved())
+                continue;
+
+            roots.addAll(resolveConfigurationFiles(configuration));
+        }
+
+        return List.copyOf(roots);
+    }
+
+    private static List<File> buildClasspathRoots(Project project) {
+        LinkedHashSet<File> roots = new LinkedHashSet<>();
+        SourceSetContainer sourceSets = project.getExtensions().findByType(SourceSetContainer.class);
+        if (sourceSets != null) {
+            for (SourceSet sourceSet : sourceSets) {
+                try {
+                    roots.addAll(sourceSet.getCompileClasspath().getFiles());
+                } catch (Exception ignored) {
+                    // Keep model building best-effort when an individual classpath cannot be resolved.
+                }
+            }
+        }
+
+        if (roots.isEmpty())
+            roots.addAll(resolveMatchingConfigurationFiles(project, "compileclasspath"));
+
+        return List.copyOf(roots);
+    }
+
+    private static List<File> buildModulePathRoots(List<File> classpathRoots) {
+        return classpathRoots.stream()
+                .filter(DTOBuilder::isModulePathCandidate)
+                .toList();
     }
 
     private static File findClassesDir(Project project, String sourceSetName) {
@@ -220,23 +268,60 @@ public class DTOBuilder {
         return false;
     }
 
-    private static List<RailroadConfiguration> buildConfigurations(Project project, Supplier<RailroadModule> moduleSupplier) {
-        List<RailroadConfiguration> configurations = new ArrayList<>();
-
+    private static List<File> resolveMatchingConfigurationFiles(Project project, String configurationNameFragment) {
+        LinkedHashSet<File> files = new LinkedHashSet<>();
+        String fragment = configurationNameFragment.toLowerCase(Locale.ROOT);
         for (Configuration configuration : project.getConfigurations()) {
             if (!configuration.isCanBeResolved())
                 continue;
 
+            if (!configuration.getName().toLowerCase(Locale.ROOT).contains(fragment))
+                continue;
+
+            files.addAll(resolveConfigurationFiles(configuration));
+        }
+
+        return List.copyOf(files);
+    }
+
+    private static List<File> resolveConfigurationFiles(Configuration configuration) {
+        try {
+            LinkedHashSet<File> files = new LinkedHashSet<>();
+            for (ResolvedArtifact artifact : configuration.getResolvedConfiguration().getResolvedArtifacts()) {
+                File file = artifact.getFile();
+                if (file != null && file.exists())
+                    files.add(file);
+            }
+
+            return List.copyOf(files);
+        } catch (Exception ignored) {
+            return Collections.emptyList();
+        }
+    }
+
+    private static List<RailroadConfiguration> buildConfigurations(Project project, Supplier<RailroadModule> moduleSupplier) {
+        List<RailroadConfiguration> configurations = new ArrayList<>();
+
+        for (Configuration configuration : project.getConfigurations()) {
             try {
                 RailroadModule moduleRef = moduleSupplier.get();
-                Supplier<HierarchicalElement> configurationRefSupplier = () -> buildConfigurationReference(
-                        configuration,
-                        moduleRef
-                );
-                List<RailroadDependency> dependencies = collectDependencies(configurationRefSupplier, configuration);
+                List<RailroadDependency> dependencies = Collections.emptyList();
+                if (configuration.isCanBeResolved()) {
+                    Supplier<HierarchicalElement> configurationRefSupplier = () -> buildConfigurationReference(
+                            configuration,
+                            moduleRef
+                    );
+                    dependencies = collectDependencies(configurationRefSupplier, configuration);
+                }
                 configurations.add(new BasicRailroadConfiguration(
                         configuration.getName(),
                         configuration.getDescription(),
+                        configuration.isCanBeResolved(),
+                        configuration.isCanBeConsumed(),
+                        configuration.isVisible(),
+                        configuration.isTransitive(),
+                        configuration.getExtendsFrom().stream().map(Configuration::getName).sorted().toList(),
+                        collectConfigurationAttributes(configuration.getAttributes()),
                         moduleRef,
                         dependencies
                 ));
@@ -475,6 +560,9 @@ public class DTOBuilder {
                 contentRoots,
                 Collections.emptyList(),
                 Collections.emptyList(),
+                Collections.emptyList(),
+                Collections.emptyList(),
+                Collections.emptyList(),
                 gradleProjectRef,
                 projectIdentifier
         );
@@ -485,9 +573,51 @@ public class DTOBuilder {
         return new BasicRailroadConfiguration(
                 configuration.getName(),
                 configuration.getDescription(),
+                configuration.isCanBeResolved(),
+                configuration.isCanBeConsumed(),
+                configuration.isVisible(),
+                configuration.isTransitive(),
+                configuration.getExtendsFrom().stream().map(Configuration::getName).sorted().toList(),
+                collectConfigurationAttributes(configuration.getAttributes()),
                 module,
                 Collections.emptyList()
         );
+    }
+
+    private static Map<String, String> collectConfigurationAttributes(AttributeContainer attributes) {
+        Map<String, String> values = new TreeMap<>();
+        for (Attribute<?> attribute : attributes.keySet()) {
+            Object value = attributes.getAttribute(attribute);
+            values.put(attribute.getName(), value == null ? "" : String.valueOf(value));
+        }
+
+        return values;
+    }
+
+    private static boolean isModulePathCandidate(File file) {
+        if (file == null || !file.exists())
+            return false;
+
+        if (file.isDirectory())
+            return new File(file, "module-info.class").isFile();
+
+        String lowerName = file.getName().toLowerCase(Locale.ROOT);
+        if (!lowerName.endsWith(".jar"))
+            return false;
+
+        try (JarFile jarFile = new JarFile(file)) {
+            if (jarFile.getEntry("module-info.class") != null)
+                return true;
+
+            Manifest manifest = jarFile.getManifest();
+            if (manifest == null)
+                return false;
+
+            String automaticModuleName = manifest.getMainAttributes().getValue("Automatic-Module-Name");
+            return automaticModuleName != null && !automaticModuleName.isBlank();
+        } catch (IOException ignored) {
+            return false;
+        }
     }
 
     private static RailroadGradleTask buildTaskReference(Task task,

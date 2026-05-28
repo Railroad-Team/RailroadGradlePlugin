@@ -23,6 +23,9 @@ public record BasicRailroadModule(String name,
                                   RailroadJavaLanguageSettings javaLanguageSettings,
                                   RailroadCompilerOutput compilerOutput,
                                   List<RailroadContentRoot> contentRoots,
+                                  List<File> dependencyRoots,
+                                  List<File> classpathRoots,
+                                  List<File> modulePathRoots,
                                   List<RailroadConfiguration> configurations,
                                   List<RailroadGradleTask> tasks,
                                   GradleProject gradleProject,
@@ -66,6 +69,21 @@ public record BasicRailroadModule(String name,
     @Override
     public DomainObjectSet<? extends RailroadGradleTask> getTasks() {
         return ImmutableDomainObjectSet.of(tasks);
+    }
+
+    @Override
+    public List<File> getDependencyRoots() {
+        return List.copyOf(dependencyRoots);
+    }
+
+    @Override
+    public List<File> getClasspathRoots() {
+        return List.copyOf(classpathRoots);
+    }
+
+    @Override
+    public List<File> getModulePathRoots() {
+        return List.copyOf(modulePathRoots);
     }
 
     @Override
