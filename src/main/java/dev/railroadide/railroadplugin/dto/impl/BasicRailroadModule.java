@@ -29,7 +29,8 @@ public record BasicRailroadModule(String name,
                                   List<RailroadConfiguration> configurations,
                                   List<RailroadGradleTask> tasks,
                                   GradleProject gradleProject,
-                                  ProjectIdentifier projectIdentifier) implements RailroadModule, Serializable {
+                                  ProjectIdentifier projectIdentifier,
+                                  List<String> resolutionFailures) implements RailroadModule, Serializable {
     @Serial
     private static final long serialVersionUID = 1L;
 
@@ -84,6 +85,11 @@ public record BasicRailroadModule(String name,
     @Override
     public List<File> getModulePathRoots() {
         return List.copyOf(modulePathRoots);
+    }
+
+    @Override
+    public List<String> getResolutionFailures() {
+        return List.copyOf(resolutionFailures);
     }
 
     @Override

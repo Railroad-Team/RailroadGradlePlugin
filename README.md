@@ -27,6 +27,24 @@ The plugin requires a Java 21 Gradle runtime (the plugin itself is built with Ja
 - **Railroad IDE models**: Registers custom tooling models that describe the Gradle project, Java settings, source roots, compiler output, tasks, and resolvable configurations. Fabric and Forge projects include detected versions (Minecraft, mappings, loader/Fabric API, Loom/ForgeGradle) so the IDE can configure the workspace automatically.
 - **Documentation download tasks**: Tasks for resolving sources and/or Javadoc for all resolvable configurations to warm caches before opening the project in the IDE.
 
+## Fetching the model
+
+Fetch the project model with `RailroadProjectAction` rather than requesting `RailroadProject` directly:
+
+```java
+RailroadProject project = connection.action(new RailroadProjectAction())
+        .withArguments("--init-script", initScript)
+        .run();
+```
+
+The action builds one `RailroadModule` per project, each in that project's own context. From Gradle 9, a model
+builder may only resolve configurations of the project it runs for. In parallel builds (`org.gradle.parallel=true`)
+that means a `RailroadProject` requested from the root cannot resolve any subproject's classpath. That path still
+works, but such modules come back with empty roots and their errors listed in `getResolutionFailures()`.
+
+`RailroadModule.getResolutionFailures()` and `RailroadConfiguration.getResolutionFailures()` list every resolution
+problem. An empty list means the roots are complete, so empty roots really mean "no dependencies".
+
 ## Documentation download tasks
 
 After applying the plugin, the following tasks are available:

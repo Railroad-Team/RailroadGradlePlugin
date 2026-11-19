@@ -22,7 +22,8 @@ public record BasicRailroadConfiguration(String name,
                                          List<String> extendsFrom,
                                          Map<String, String> attributes,
                                          RailroadModule parent,
-                                         List<RailroadDependency> dependencies) implements RailroadConfiguration, Serializable {
+                                         List<RailroadDependency> dependencies,
+                                         List<String> resolutionFailures) implements RailroadConfiguration, Serializable {
     @Serial
     private static final long serialVersionUID = 1L;
 
@@ -69,6 +70,11 @@ public record BasicRailroadConfiguration(String name,
     @Override
     public DomainObjectSet<? extends RailroadDependency> getDependencies() {
         return ImmutableDomainObjectSet.of(dependencies);
+    }
+
+    @Override
+    public List<String> getResolutionFailures() {
+        return List.copyOf(resolutionFailures);
     }
 
     @Override

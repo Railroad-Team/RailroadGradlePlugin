@@ -23,6 +23,12 @@ public interface RailroadModule extends HierarchicalElement, HasGradleProject {
     List<File> getDependencyRoots();
     List<File> getClasspathRoots();
     List<File> getModulePathRoots();
+
+    /**
+     * Problems hit while resolving this module's configurations and classpaths, one human-readable line each.
+     * An empty list means resolution succeeded, so empty roots really mean "no dependencies".
+     */
+    List<String> getResolutionFailures();
     String getPath();
     Path getProjectDir();
 }

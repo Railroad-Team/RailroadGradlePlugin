@@ -6,9 +6,7 @@ import org.gradle.api.Project;
 import org.gradle.api.Task;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.artifacts.ModuleVersionIdentifier;
-import org.gradle.api.artifacts.ResolvedArtifact;
 import org.gradle.api.artifacts.component.ComponentIdentifier;
-import org.gradle.api.artifacts.result.ResolutionResult;
 import org.gradle.api.artifacts.result.ResolvedComponentResult;
 import org.gradle.api.artifacts.result.ResolvedDependencyResult;
 import org.gradle.api.attributes.Attribute;
@@ -37,8 +35,24 @@ import java.util.jar.JarFile;
 import java.util.jar.Manifest;
 
 public class DTOBuilder {
+    /**
+     * Builds the whole-build model from a single project. Gradle only holds that project's lock while this runs, so
+     * on Gradle 9+ every other project's configurations fail to resolve (recorded in
+     * {@link RailroadModule#getResolutionFailures()}). Clients should prefer
+     * {@link dev.railroadide.railroadplugin.action.RailroadProjectAction}, which builds each module in its own
+     * project's context.
+     */
     public static RailroadProject buildProject(Project project) {
         return buildProject(project, buildProjectReference(project.getParent()));
+    }
+
+    /**
+     * Builds the model for one project. Meant to run in that project's own context (for example through
+     * {@code BuildController.getModel(project, RailroadModule.class)}), where Gradle holds its lock and dependency
+     * resolution is allowed.
+     */
+    public static RailroadModule buildModule(Project project) {
+        return buildModule(project, buildProjectReference(project.getRootProject()));
     }
 
     private static RailroadProject buildProject(Project project, @Nullable RailroadProject parentDto) {
@@ -61,13 +75,14 @@ public class DTOBuilder {
     }
 
     private static RailroadModule buildModule(Project project, RailroadProject parentProject) {
+        var resolver = new ConfigurationResolver(project);
         List<RailroadConfiguration> configurations = new ArrayList<>();
         List<RailroadGradleTask> tasks = new ArrayList<>();
         List<RailroadContentRoot> contentRoots = buildContentRoots(project);
         RailroadJavaLanguageSettings javaLanguageSettings = buildJavaLanguageSettings(project);
         RailroadCompilerOutput compilerOutput = buildCompilerOutput(project);
-        List<File> dependencyRoots = buildDependencyRoots(project);
-        List<File> classpathRoots = buildClasspathRoots(project);
+        List<File> dependencyRoots = buildDependencyRoots(project, resolver);
+        List<File> classpathRoots = buildClasspathRoots(project, resolver);
         List<File> modulePathRoots = buildModulePathRoots(classpathRoots);
 
         var projectIdentifier = new DefaultProjectIdentifier(project.getRootDir(), project.getPath());
@@ -96,6 +111,7 @@ public class DTOBuilder {
                 projectIdentifier
         );
 
+        List<String> resolutionFailures = new ArrayList<>();
         var module = new BasicRailroadModule(
                 project.getName(),
                 project.getDescription(),
@@ -111,13 +127,28 @@ public class DTOBuilder {
                 configurations,
                 tasks,
                 gradleProject,
-                projectIdentifier
+                projectIdentifier,
+                resolutionFailures
         );
 
         tasks.addAll(buildTasks(project, moduleRefSupplier, gradleProjectRef, gradleTasks));
-        configurations.addAll(buildConfigurations(project, moduleRefSupplier));
+        configurations.addAll(buildConfigurations(project, moduleRefSupplier, resolver));
+
+        resolutionFailures.addAll(resolver.failures());
+        logResolutionFailures(project, resolutionFailures);
 
         return module;
+    }
+
+    private static void logResolutionFailures(Project project, List<String> failures) {
+        if (failures.isEmpty())
+            return;
+
+        project.getLogger().warn("Railroad: {} dependency resolution problem(s) in project '{}'; first: {}",
+                failures.size(), project.getPath(), failures.getFirst());
+        for (String failure : failures) {
+            project.getLogger().info("Railroad: {}", failure);
+        }
     }
 
     private static RailroadCompilerOutput buildCompilerOutput(Project project) {
@@ -126,33 +157,39 @@ public class DTOBuilder {
         return new BasicRailroadCompilerOutput(false, outputDir, testOutputDir);
     }
 
-    private static List<File> buildDependencyRoots(Project project) {
+    private static List<File> buildDependencyRoots(Project project, ConfigurationResolver resolver) {
         LinkedHashSet<File> roots = new LinkedHashSet<>();
-        for (Configuration configuration : project.getConfigurations()) {
+        for (Configuration configuration : List.copyOf(project.getConfigurations())) {
             if (!configuration.isCanBeResolved())
                 continue;
 
-            roots.addAll(resolveConfigurationFiles(configuration));
+            roots.addAll(resolver.resolve(configuration).files());
         }
 
         return List.copyOf(roots);
     }
 
-    private static List<File> buildClasspathRoots(Project project) {
+    private static List<File> buildClasspathRoots(Project project, ConfigurationResolver resolver) {
         LinkedHashSet<File> roots = new LinkedHashSet<>();
         SourceSetContainer sourceSets = project.getExtensions().findByType(SourceSetContainer.class);
         if (sourceSets != null) {
             for (SourceSet sourceSet : sourceSets) {
                 try {
                     roots.addAll(sourceSet.getCompileClasspath().getFiles());
-                } catch (Exception ignored) {
-                    // Keep model building best-effort when an individual classpath cannot be resolved.
+                } catch (Exception exception) {
+                    resolver.recordFailure("compile classpath of source set '" + sourceSet.getName() + "' in project '"
+                            + project.getPath() + "'", exception);
+                    // Fall back to whatever the backing configuration resolves to leniently.
+                    Configuration configuration = project.getConfigurations()
+                            .findByName(sourceSet.getCompileClasspathConfigurationName());
+                    if (configuration != null && configuration.isCanBeResolved())
+                        roots.addAll(resolver.resolve(configuration).files());
                 }
             }
         }
 
         if (roots.isEmpty())
-            roots.addAll(resolveMatchingConfigurationFiles(project, "compileclasspath"));
+            roots.addAll(resolveMatchingConfigurationFiles(project, "compileclasspath", resolver));
 
         return List.copyOf(roots);
     }
@@ -268,50 +305,42 @@ public class DTOBuilder {
         return false;
     }
 
-    private static List<File> resolveMatchingConfigurationFiles(Project project, String configurationNameFragment) {
+    private static List<File> resolveMatchingConfigurationFiles(Project project,
+                                                                String configurationNameFragment,
+                                                                ConfigurationResolver resolver) {
         LinkedHashSet<File> files = new LinkedHashSet<>();
         String fragment = configurationNameFragment.toLowerCase(Locale.ROOT);
-        for (Configuration configuration : project.getConfigurations()) {
+        for (Configuration configuration : List.copyOf(project.getConfigurations())) {
             if (!configuration.isCanBeResolved())
                 continue;
 
             if (!configuration.getName().toLowerCase(Locale.ROOT).contains(fragment))
                 continue;
 
-            files.addAll(resolveConfigurationFiles(configuration));
+            files.addAll(resolver.resolve(configuration).files());
         }
 
         return List.copyOf(files);
     }
 
-    private static List<File> resolveConfigurationFiles(Configuration configuration) {
-        try {
-            LinkedHashSet<File> files = new LinkedHashSet<>();
-            for (ResolvedArtifact artifact : configuration.getResolvedConfiguration().getResolvedArtifacts()) {
-                File file = artifact.getFile();
-                if (file != null && file.exists())
-                    files.add(file);
-            }
-
-            return List.copyOf(files);
-        } catch (Exception ignored) {
-            return Collections.emptyList();
-        }
-    }
-
-    private static List<RailroadConfiguration> buildConfigurations(Project project, Supplier<RailroadModule> moduleSupplier) {
+    private static List<RailroadConfiguration> buildConfigurations(Project project,
+                                                                   Supplier<RailroadModule> moduleSupplier,
+                                                                   ConfigurationResolver resolver) {
         List<RailroadConfiguration> configurations = new ArrayList<>();
 
-        for (Configuration configuration : project.getConfigurations()) {
+        for (Configuration configuration : List.copyOf(project.getConfigurations())) {
             try {
                 RailroadModule moduleRef = moduleSupplier.get();
                 List<RailroadDependency> dependencies = Collections.emptyList();
+                List<String> failures = Collections.emptyList();
                 if (configuration.isCanBeResolved()) {
+                    ConfigurationResolver.Result resolved = resolver.resolve(configuration);
+                    failures = resolved.failures();
                     Supplier<HierarchicalElement> configurationRefSupplier = () -> buildConfigurationReference(
                             configuration,
                             moduleRef
                     );
-                    dependencies = collectDependencies(configurationRefSupplier, configuration);
+                    dependencies = collectDependencies(configurationRefSupplier, resolved);
                 }
                 configurations.add(new BasicRailroadConfiguration(
                         configuration.getName(),
@@ -323,10 +352,12 @@ public class DTOBuilder {
                         configuration.getExtendsFrom().stream().map(Configuration::getName).sorted().toList(),
                         collectConfigurationAttributes(configuration.getAttributes()),
                         moduleRef,
-                        dependencies
+                        dependencies,
+                        failures
                 ));
-            } catch (Exception ignored) {
-                // Swallow individual configuration failures to mirror previous behaviour.
+            } catch (Exception exception) {
+                resolver.recordFailure("building configuration '" + configuration.getName() + "' of project '"
+                        + project.getPath() + "'", exception);
             }
         }
 
@@ -334,11 +365,12 @@ public class DTOBuilder {
     }
 
     private static List<RailroadDependency> collectDependencies(Supplier<HierarchicalElement> parentSupplier,
-                                                                Configuration configuration) {
-        Map<ModuleVersionIdentifier, ResolvedArtifact> artifactPaths = indexArtifacts(configuration);
-        ResolutionResult resolutionResult = configuration.getIncoming().getResolutionResult();
-        ResolvedComponentResult root = resolutionResult.getRoot();
+                                                                ConfigurationResolver.Result resolved) {
+        ResolvedComponentResult root = resolved.root();
+        if (root == null)
+            return Collections.emptyList();
 
+        Map<ComponentIdentifier, File> artifactPaths = resolved.artifactsByComponent();
         return root.getDependencies().stream()
                 .filter(dependencyResult -> dependencyResult instanceof ResolvedDependencyResult)
                 .map(ResolvedDependencyResult.class::cast)
@@ -348,21 +380,13 @@ public class DTOBuilder {
 
     private static RailroadDependency buildNode(HierarchicalElement parent,
                                                 ResolvedComponentResult component,
-                                                Map<ModuleVersionIdentifier, ResolvedArtifact> artifactPaths,
+                                                Map<ComponentIdentifier, File> artifactPaths,
                                                 Set<ComponentIdentifier> visiting) {
         ComponentIdentifier identifier = component.getId();
         ModuleVersionIdentifier moduleVersion = component.getModuleVersion();
 
         if (!visiting.add(identifier)) {
-            return new BasicRailroadDependency(
-                    parent,
-                    moduleVersion.getGroup(),
-                    moduleVersion.getName(),
-                    moduleVersion.getVersion(),
-                    Optional.ofNullable(artifactPaths.get(moduleVersion)).map(ResolvedArtifact::getFile).orElse(new File("")),
-                    identifier.getDisplayName(),
-                    Collections.emptyList()
-            );
+            return buildDependencyReference(parent, moduleVersion, artifactPaths, identifier);
         }
 
         List<RailroadDependency> children = new ArrayList<>();
@@ -385,28 +409,16 @@ public class DTOBuilder {
 
         var dependency = new BasicRailroadDependency(
                 parent,
-                moduleVersion.getGroup(),
-                moduleVersion.getName(),
-                moduleVersion.getVersion(),
-                Optional.ofNullable(artifactPaths.get(moduleVersion)).map(ResolvedArtifact::getFile).orElse(new File("")),
+                moduleVersion == null ? "" : moduleVersion.getGroup(),
+                moduleVersion == null ? identifier.getDisplayName() : moduleVersion.getName(),
+                moduleVersion == null ? "" : moduleVersion.getVersion(),
+                artifactPaths.getOrDefault(identifier, new File("")),
                 identifier.getDisplayName(),
                 children
         );
 
         visiting.remove(identifier);
         return dependency;
-    }
-
-    private static Map<ModuleVersionIdentifier, ResolvedArtifact> indexArtifacts(Configuration configuration) {
-        Collection<ResolvedArtifact> artifacts = configuration.getResolvedConfiguration().getResolvedArtifacts();
-        Map<ModuleVersionIdentifier, ResolvedArtifact> index = new HashMap<>(artifacts.size());
-
-        for (ResolvedArtifact artifact : artifacts) {
-            ModuleVersionIdentifier id = artifact.getModuleVersion().getId();
-            index.putIfAbsent(id, artifact);
-        }
-
-        return index;
     }
 
     private static List<RailroadGradleTask> buildTasks(Project project,
@@ -564,7 +576,8 @@ public class DTOBuilder {
                 Collections.emptyList(),
                 Collections.emptyList(),
                 gradleProjectRef,
-                projectIdentifier
+                projectIdentifier,
+                Collections.emptyList()
         );
     }
 
@@ -580,6 +593,7 @@ public class DTOBuilder {
                 configuration.getExtendsFrom().stream().map(Configuration::getName).sorted().toList(),
                 collectConfigurationAttributes(configuration.getAttributes()),
                 module,
+                Collections.emptyList(),
                 Collections.emptyList()
         );
     }
@@ -639,15 +653,15 @@ public class DTOBuilder {
     }
 
     private static RailroadDependency buildDependencyReference(HierarchicalElement parent,
-                                                               ModuleVersionIdentifier moduleVersion,
-                                                               Map<ModuleVersionIdentifier, ResolvedArtifact> artifactPaths,
+                                                               @Nullable ModuleVersionIdentifier moduleVersion,
+                                                               Map<ComponentIdentifier, File> artifactPaths,
                                                                ComponentIdentifier identifier) {
         return new BasicRailroadDependency(
                 parent,
-                moduleVersion.getGroup(),
-                moduleVersion.getName(),
-                moduleVersion.getVersion(),
-                Optional.ofNullable(artifactPaths.get(moduleVersion)).map(ResolvedArtifact::getFile).orElse(new File("")),
+                moduleVersion == null ? "" : moduleVersion.getGroup(),
+                moduleVersion == null ? identifier.getDisplayName() : moduleVersion.getName(),
+                moduleVersion == null ? "" : moduleVersion.getVersion(),
+                artifactPaths.getOrDefault(identifier, new File("")),
                 identifier.getDisplayName(),
                 Collections.emptyList()
         );

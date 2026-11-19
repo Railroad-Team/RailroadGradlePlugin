@@ -24,6 +24,12 @@ public interface RailroadConfiguration extends HierarchicalElement {
 
     DomainObjectSet<? extends RailroadDependency> getDependencies();
 
+    /**
+     * Problems hit while resolving this configuration, one human-readable line each. Empty when it resolved
+     * cleanly or is not resolvable.
+     */
+    List<String> getResolutionFailures();
+
     @Nullable
     RailroadModule getParent();
 }
