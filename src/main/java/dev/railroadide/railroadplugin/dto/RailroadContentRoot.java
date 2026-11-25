@@ -4,8 +4,13 @@ import org.gradle.tooling.model.DomainObjectSet;
 
 import java.io.File;
 import java.util.Set;
+import java.util.List;
 
 public interface RailroadContentRoot {
+    String getSourceSetName();
+    List<File> getCompileClasspath();
+    List<File> getClassOutputs();
+    File getCompilerHome();
     File getRootDirectory();
 
     DomainObjectSet<? extends RailroadSourceDirectory> getSourceDirectories();

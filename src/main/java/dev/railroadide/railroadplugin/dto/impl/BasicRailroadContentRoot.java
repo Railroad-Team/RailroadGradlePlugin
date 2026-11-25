@@ -13,6 +13,10 @@ import java.util.List;
 import java.util.Set;
 
 public record BasicRailroadContentRoot(File rootDirectory,
+                                       String sourceSetName,
+                                       List<File> compileClasspath,
+                                       List<File> classOutputs,
+                                       File compilerHome,
                                        List<RailroadSourceDirectory> sourceDirectories,
                                        List<RailroadSourceDirectory> testSourceDirectories,
                                        List<RailroadSourceDirectory> resourceDirectories,
@@ -20,6 +24,26 @@ public record BasicRailroadContentRoot(File rootDirectory,
                                        Set<File> excludedDirectories) implements RailroadContentRoot, Serializable {
     @Serial
     private static final long serialVersionUID = 1L;
+
+    @Override
+    public String getSourceSetName() {
+        return sourceSetName;
+    }
+
+    @Override
+    public List<File> getCompileClasspath() {
+        return compileClasspath;
+    }
+
+    @Override
+    public List<File> getClassOutputs() {
+        return classOutputs;
+    }
+
+    @Override
+    public File getCompilerHome() {
+        return compilerHome;
+    }
 
     @Override
     public File getRootDirectory() {

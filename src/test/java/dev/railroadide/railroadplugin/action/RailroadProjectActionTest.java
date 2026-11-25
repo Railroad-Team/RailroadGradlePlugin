@@ -69,7 +69,8 @@ class RailroadProjectActionTest {
         write(projectDir.resolve("app/build.gradle"), """
                 plugins { id 'java' }
                 repositories { maven { url = uri('../repo') } }
-                dependencies { implementation 'com.example:greeting:1.0' }
+                sourceSets { client { java.srcDirs = ['client-code']; compileClasspath += sourceSets.main.output } }
+                dependencies { implementation 'com.example:greeting:1.0'; clientImplementation files('client-only.jar') }
                 """);
 
         // Mirrors Railroad's init-gradle-plugin.gradle, with the plugin under test instead of a published version.
@@ -107,6 +108,17 @@ class RailroadProjectActionTest {
         assertTrue(containsLibrary(app.getClasspathRoots()), "classpath roots: " + app.getClasspathRoots());
         assertTrue(containsLibrary(app.getDependencyRoots()), "dependency roots: " + app.getDependencyRoots());
 
+        var sets = app.getContentRoots().stream().collect(Collectors.toMap(root -> root.getSourceSetName(), root -> root));
+        var main = sets.get("main");
+        var client = sets.get("client");
+        assertTrue(main.getTestSourceDirectories().isEmpty());
+        assertTrue(sets.get("test").getSourceDirectories().isEmpty());
+        assertTrue(client.getSourceDirectories().stream().anyMatch(dir -> dir.getDirectory().getName().equals("client-code")));
+        assertTrue(client.getCompileClasspath().stream().anyMatch(main.getClassOutputs()::contains));
+        assertTrue(client.getCompileClasspath().stream().anyMatch(file -> file.getName().equals("client-only.jar")));
+        assertFalse(main.getCompileClasspath().stream().anyMatch(file -> file.getName().equals("client-only.jar")));
+        assertNotNull(main.getCompilerHome());
+
         RailroadConfiguration compileClasspath = app.getConfigurations().stream()
                 .filter(configuration -> configuration.getName().equals("compileClasspath"))
                 .findFirst()
@@ -133,7 +145,7 @@ class RailroadProjectActionTest {
 
         // The root-level model cannot resolve :app under Gradle 9, but it must say so instead of reporting no jars.
         RailroadModule app = module(project, ":app");
-        assertTrue(app.getClasspathRoots().isEmpty(), "classpath roots: " + app.getClasspathRoots());
+        assertFalse(containsLibrary(app.getClasspathRoots()), "classpath roots: " + app.getClasspathRoots());
         assertFalse(app.getResolutionFailures().isEmpty(), "expected resolution failures for :app");
         assertTrue(app.getResolutionFailures().stream().anyMatch(failure -> failure.contains(":app:compileClasspath")),
                 "failures: " + app.getResolutionFailures());

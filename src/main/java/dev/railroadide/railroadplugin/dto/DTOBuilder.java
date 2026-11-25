@@ -18,6 +18,8 @@ import org.gradle.api.plugins.JavaPluginExtension;
 import org.gradle.api.tasks.SourceSet;
 import org.gradle.api.tasks.SourceSetContainer;
 import org.gradle.api.tasks.SourceSetOutput;
+import org.gradle.api.tasks.compile.JavaCompile;
+import org.gradle.api.tasks.bundling.Jar;
 import org.gradle.tooling.internal.gradle.DefaultProjectIdentifier;
 import org.gradle.tooling.model.GradleProject;
 import org.gradle.tooling.model.GradleTask;
@@ -78,11 +80,13 @@ public class DTOBuilder {
         var resolver = new ConfigurationResolver(project);
         List<RailroadConfiguration> configurations = new ArrayList<>();
         List<RailroadGradleTask> tasks = new ArrayList<>();
-        List<RailroadContentRoot> contentRoots = buildContentRoots(project);
+        List<RailroadContentRoot> contentRoots = buildContentRoots(project, resolver);
         RailroadJavaLanguageSettings javaLanguageSettings = buildJavaLanguageSettings(project);
         RailroadCompilerOutput compilerOutput = buildCompilerOutput(project);
         List<File> dependencyRoots = buildDependencyRoots(project, resolver);
-        List<File> classpathRoots = buildClasspathRoots(project, resolver);
+        List<File> classpathRoots = contentRoots.isEmpty()
+                ? List.copyOf(resolveMatchingConfigurationFiles(project, "compileclasspath", resolver))
+                : contentRoots.stream().flatMap(root -> root.getCompileClasspath().stream()).distinct().toList();
         List<File> modulePathRoots = buildModulePathRoots(classpathRoots);
 
         var projectIdentifier = new DefaultProjectIdentifier(project.getRootDir(), project.getPath());
@@ -169,31 +173,6 @@ public class DTOBuilder {
         return List.copyOf(roots);
     }
 
-    private static List<File> buildClasspathRoots(Project project, ConfigurationResolver resolver) {
-        LinkedHashSet<File> roots = new LinkedHashSet<>();
-        SourceSetContainer sourceSets = project.getExtensions().findByType(SourceSetContainer.class);
-        if (sourceSets != null) {
-            for (SourceSet sourceSet : sourceSets) {
-                try {
-                    roots.addAll(sourceSet.getCompileClasspath().getFiles());
-                } catch (Exception exception) {
-                    resolver.recordFailure("compile classpath of source set '" + sourceSet.getName() + "' in project '"
-                            + project.getPath() + "'", exception);
-                    // Fall back to whatever the backing configuration resolves to leniently.
-                    Configuration configuration = project.getConfigurations()
-                            .findByName(sourceSet.getCompileClasspathConfigurationName());
-                    if (configuration != null && configuration.isCanBeResolved())
-                        roots.addAll(resolver.resolve(configuration).files());
-                }
-            }
-        }
-
-        if (roots.isEmpty())
-            roots.addAll(resolveMatchingConfigurationFiles(project, "compileclasspath", resolver));
-
-        return List.copyOf(roots);
-    }
-
     private static List<File> buildModulePathRoots(List<File> classpathRoots) {
         return classpathRoots.stream()
                 .filter(DTOBuilder::isModulePathCandidate)
@@ -226,9 +205,7 @@ public class DTOBuilder {
         return new BasicRailroadJavaLanguageSettings(sourceCompatibility, targetCompatibility, installedJdk);
     }
 
-    private static List<RailroadContentRoot> buildContentRoots(Project project) {
-        if (!project.getPlugins().hasPlugin(JavaPlugin.class))
-            return Collections.emptyList();
+    private static List<RailroadContentRoot> buildContentRoots(Project project, ConfigurationResolver resolver) {
 
         SourceSetContainer sourceSets = project.getExtensions().findByType(SourceSetContainer.class);
         if (sourceSets == null)
@@ -238,18 +215,42 @@ public class DTOBuilder {
         List<RailroadContentRoot> roots = new ArrayList<>();
 
         for (SourceSet sourceSet : sourceSets) {
-            List<RailroadSourceDirectory> sources = toSourceDirectories(sourceSet.getAllSource().getSrcDirs(), buildDir, "source");
-            List<RailroadSourceDirectory> testSources = toSourceDirectories(sourceSet.getAllJava().getSrcDirs(), buildDir, "testSource");
+            JavaCompile compile = (JavaCompile) project.getTasks().getByName(sourceSet.getCompileJavaTaskName());
+            Set<File> javaDirs = new LinkedHashSet<>(sourceSet.getJava().getSrcDirs());
+            File generated = compile.getOptions().getGeneratedSourceOutputDirectory().getAsFile().getOrNull();
+            if (generated != null) javaDirs.add(generated);
+            List<RailroadSourceDirectory> java = javaDirs.stream()
+                    .<RailroadSourceDirectory>map(dir -> new BasicRailroadSourceDirectory(dir.equals(generated)
+                            || isGenerated(buildDir, dir), dir, "source")).toList();
             List<RailroadSourceDirectory> resources = toSourceDirectories(sourceSet.getResources().getSrcDirs(), buildDir, "resource");
-            List<RailroadSourceDirectory> testResources = toSourceDirectories(sourceSet.getResources().getSrcDirs(), buildDir, "testResource");
+            List<File> classpath;
+            try {
+                classpath = List.copyOf(compile.getClasspath().getFiles());
+            } catch (Exception failure) {
+                resolver.recordFailure("compile classpath of " + compile.getPath(), failure);
+                Configuration configuration = project.getConfigurations().findByName(sourceSet.getCompileClasspathConfigurationName());
+                classpath = configuration == null ? List.of() : List.copyOf(resolver.resolve(configuration).files());
+            }
+            File compilerHome = null;
+            try {
+                var compiler = compile.getJavaCompiler().getOrNull();
+                if (compiler != null) compilerHome = compiler.getMetadata().getInstallationPath().getAsFile();
+            } catch (Exception failure) {
+                resolver.recordFailure("compiler of " + compile.getPath(), failure);
+            }
+            Set<File> outputs = new LinkedHashSet<>(sourceSet.getOutput().getClassesDirs().getFiles());
+            if (project.getTasks().findByName(sourceSet.getJarTaskName()) instanceof Jar jar) {
+                outputs.add(jar.getArchiveFile().get().getAsFile());
+            }
+            boolean test = SourceSet.TEST_SOURCE_SET_NAME.equals(sourceSet.getName());
             Set<File> excluded = collectExcludedDirectories(project, sourceSet);
 
             roots.add(new BasicRailroadContentRoot(
-                    project.getProjectDir(),
-                    sources,
-                    testSources,
-                    resources,
-                    testResources,
+                    project.getProjectDir(), sourceSet.getName(), classpath, List.copyOf(outputs), compilerHome,
+                    test ? List.of() : java,
+                    test ? java : List.of(),
+                    test ? List.of() : resources,
+                    test ? resources : List.of(),
                     excluded
             ));
         }
